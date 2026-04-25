@@ -21,10 +21,15 @@ jobs:
           cache: pip
       - name: Install ruff
         run: pip install ruff==0.15.12
+      - name: Ruff version
+        run: |
+          which ruff
+          ruff --version
+          python -m ruff --version
       - name: Ruff check
-        run: ruff check .
+        run: python -m ruff check .
       - name: Ruff format check
-        run: ruff format --check .
+        run: python -m ruff format --check .
 
   test:
     name: Test (Python ${{ matrix.python }})
