@@ -14,13 +14,13 @@ def test_package_imports():
     assert pkg.__version__
 
 
-def test_cli_main_returns_not_implemented_exit_code(capsys):
+def test_cli_main_requires_prompt(capsys):
     from pyharness.cli import main
 
     rc = main([])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "not yet implemented" in captured.err.lower()
+    assert "no prompt" in captured.err.lower()
 
 
 def test_subsystem_modules_import():
