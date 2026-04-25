@@ -1,10 +1,8 @@
-"""Smoke tests for the pyharness-tui package."""
+"""Smoke tests for the minimal pyharness-tui REPL."""
 
 from __future__ import annotations
 
 import importlib
-
-import pytest
 
 from pyharness import LLMResponse
 from harness.coding_agent import CodingAgent
@@ -13,22 +11,11 @@ from harness.coding_agent import CodingAgent
 def test_pyharness_tui_imports():
     mod = importlib.import_module("pyharness_tui")
     assert mod.__version__
-    assert hasattr(mod, "TuiRenderer")
-    assert hasattr(mod, "run_tui")
+    assert callable(mod.main)
 
 
-def test_cli_main_requires_prompt(capsys):
-    from pyharness_tui.cli import main
-
-    rc = main([])
-    err = capsys.readouterr().err
-    assert rc == 2
-    assert "no prompt" in err.lower()
-
-
-def test_run_tui_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, capsys):
-    """End-to-end: pyharness-tui prints a result panel containing the
-    LLM's final text, and exits 0 on completion."""
+def test_one_shot_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, capsys):
+    """`pyharness-tui "prompt"` runs once and prints the LLM's final text."""
 
     real_init = CodingAgent.__init__
 
@@ -45,8 +32,23 @@ def test_run_tui_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, ca
 
     from pyharness_tui.cli import main
 
-    rc = main(["--bare", "do something"])
+    rc = main(["do", "something"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "all done" in out
-    assert "result" in out  # the rich panel title
+
+
+def test_repl_exits_on_eof(tmp_path, monkeypatch, isolated_session_dir):
+    """No-arg invocation enters the REPL; immediate EOF exits cleanly."""
+
+    monkeypatch.chdir(tmp_path)
+
+    def _eof(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+
+    from pyharness_tui.cli import main
+
+    rc = main([])
+    assert rc == 0

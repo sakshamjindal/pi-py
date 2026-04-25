@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyharness-tui"
 version = "0.1.0"
-description = "Minimal rich-formatted TUI for the pyharness coding agent. Passive renderer; never threads back into the SDK or harness loop."
+description = "Minimal interactive REPL for dogfooding the pyharness coding agent. Stdlib-only; passive subscriber to the event bus."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -13,7 +13,6 @@ authors = [{ name = "pyharness contributors" }]
 dependencies = [
     "pyharness",
     "harness",
-    "rich>=13.0",
 ]
 
 [project.scripts]
