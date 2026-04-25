@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyharness-workspace"
+version = "0.1.0"
+description = "Workspace shell for the pyharness monorepo (pyharness-sdk, harness, tui)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "pyharness contributors" }]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+]
+
+[tool.setuptools.packages.find]
+include = ["_workspace_root_no_packages"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+    "packages/pyharness-sdk/tests",
+    "packages/harness/tests",
+]
