@@ -1,9 +1,11 @@
-"""pyharness-tui — reserved package slot for an out-of-tree TUI.
+"""pyharness-tui — minimal REPL for dogfooding the coding agent.
 
-Headless-first is a core design principle (see DESIGN.md). The TUI
-lives in its own package so it can be developed without touching the
-SDK or coding-agent scaffolding. This module is intentionally empty
-in v1.
+Stdlib-only interactive shell. Loop behaviour is unaffected: the TUI
+is a passive subscriber to the event bus (see DESIGN.md).
 """
 
+from .cli import main
+
 __version__ = "0.1.0"
+
+__all__ = ["__version__", "main"]
