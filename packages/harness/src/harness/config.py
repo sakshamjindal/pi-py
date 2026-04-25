@@ -41,7 +41,7 @@ class Settings(BaseModel):
         project_root: Path | None = None,
         home: Path | None = None,
         cli_overrides: dict[str, Any] | None = None,
-    ) -> "Settings":
+    ) -> Settings:
         from .workspace import WorkspaceContext
 
         if workspace is None:

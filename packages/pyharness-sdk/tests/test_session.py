@@ -37,13 +37,17 @@ async def test_new_session_creates_log(tmp_path):
 @pytest.mark.asyncio
 async def test_read_messages_round_trip(tmp_path):
     s = Session.new(tmp_path, base_dir=tmp_path / "sessions")
-    await s.append_event(SessionStartEvent(session_id=s.session_id, cwd=".", model="x", system_prompt_hash="h"))
+    await s.append_event(
+        SessionStartEvent(session_id=s.session_id, cwd=".", model="x", system_prompt_hash="h")
+    )
     await s.append_event(UserMessageEvent(session_id=s.session_id, content="hi"))
     await s.append_event(
         AssistantMessageEvent(
             session_id=s.session_id,
             text="ok",
-            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "echo", "arguments": "{}"}}],
+            tool_calls=[
+                {"id": "c1", "type": "function", "function": {"name": "echo", "arguments": "{}"}}
+            ],
         )
     )
     await s.append_event(
@@ -51,7 +55,9 @@ async def test_read_messages_round_trip(tmp_path):
             session_id=s.session_id, call_id="c1", tool_name="echo", ok=True, result="hi"
         )
     )
-    await s.append_event(SessionEndEvent(session_id=s.session_id, reason="completed", final_message="done"))
+    await s.append_event(
+        SessionEndEvent(session_id=s.session_id, reason="completed", final_message="done")
+    )
 
     messages = s.read_messages()
     roles = [m.role for m in messages]
@@ -62,7 +68,11 @@ async def test_read_messages_round_trip(tmp_path):
 async def test_fork_at_event(tmp_path):
     base = tmp_path / "sessions"
     s = Session.new(tmp_path, base_dir=base)
-    await s.append_event(SessionStartEvent(session_id=s.session_id, cwd=str(tmp_path), model="x", system_prompt_hash="h"))
+    await s.append_event(
+        SessionStartEvent(
+            session_id=s.session_id, cwd=str(tmp_path), model="x", system_prompt_hash="h"
+        )
+    )
     await s.append_event(UserMessageEvent(session_id=s.session_id, content="one"))
     await s.append_event(UserMessageEvent(session_id=s.session_id, content="two"))
     await s.append_event(UserMessageEvent(session_id=s.session_id, content="three"))
@@ -79,7 +89,11 @@ async def test_fork_at_event(tmp_path):
 async def test_list_recent(tmp_path):
     base = tmp_path / "sessions"
     s = Session.new(tmp_path, base_dir=base)
-    await s.append_event(SessionStartEvent(session_id=s.session_id, cwd=str(tmp_path), model="x", system_prompt_hash="h"))
+    await s.append_event(
+        SessionStartEvent(
+            session_id=s.session_id, cwd=str(tmp_path), model="x", system_prompt_hash="h"
+        )
+    )
     items = Session.list_recent(tmp_path, base_dir=base)
     assert len(items) == 1
     assert items[0].session_id == s.session_id

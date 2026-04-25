@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from pydantic import BaseModel, Field
 
 from pyharness import (
     Agent,
@@ -13,11 +14,10 @@ from pyharness import (
     LLMResponse,
     Session,
     Tool,
+    ToolCall,
     ToolContext,
     ToolRegistry,
-    ToolCall,
 )
-from pydantic import BaseModel, Field
 
 
 class _ScriptedLLM:

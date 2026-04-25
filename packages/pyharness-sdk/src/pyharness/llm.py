@@ -26,7 +26,7 @@ class LLMError(Exception):
 
 def _is_anthropic_model(model: str) -> bool:
     m = model.lower()
-    return m.startswith("claude") or m.startswith("anthropic/")
+    return m.startswith(("claude", "anthropic/"))
 
 
 def _messages_to_dicts(messages: list[Message] | list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -130,7 +130,11 @@ class LLMClient:
                 tcid = event.tool_call_id or (tool_call_order[-1] if tool_call_order else "")
                 if tcid:
                     if tcid not in tool_calls_acc:
-                        tool_calls_acc[tcid] = {"id": tcid, "name": event.tool_name or "", "arguments_buffer": ""}
+                        tool_calls_acc[tcid] = {
+                            "id": tcid,
+                            "name": event.tool_name or "",
+                            "arguments_buffer": "",
+                        }
                         tool_call_order.append(tcid)
                     if event.arguments_delta:
                         tool_calls_acc[tcid]["arguments_buffer"] += event.arguments_delta
@@ -149,7 +153,9 @@ class LLMClient:
                 args = json.loads(buf) if buf.strip() else {}
             except json.JSONDecodeError:
                 args = {"_raw": buf}
-            tool_calls.append(ToolCall(id=entry["id"], name=entry.get("name") or "", arguments=args))
+            tool_calls.append(
+                ToolCall(id=entry["id"], name=entry.get("name") or "", arguments=args)
+            )
 
         return LLMResponse(
             text="".join(text_chunks),
@@ -226,18 +232,28 @@ async def _convert_chunk(chunk: Any, active_calls: dict[int, str]) -> AsyncItera
     """Convert a single LiteLLM streaming chunk into ``StreamEvent``s."""
 
     # Usage often arrives on a dedicated chunk at the end.
-    usage = getattr(chunk, "usage", None) or (chunk.get("usage") if isinstance(chunk, dict) else None)
+    usage = getattr(chunk, "usage", None) or (
+        chunk.get("usage") if isinstance(chunk, dict) else None
+    )
     if usage:
         yield StreamEvent(type="usage", usage=_extract_usage(usage))
 
-    choices = getattr(chunk, "choices", None) or (chunk.get("choices") if isinstance(chunk, dict) else None) or []
+    choices = (
+        getattr(chunk, "choices", None)
+        or (chunk.get("choices") if isinstance(chunk, dict) else None)
+        or []
+    )
     for choice in choices:
-        delta = getattr(choice, "delta", None) or (choice.get("delta") if isinstance(choice, dict) else None)
+        delta = getattr(choice, "delta", None) or (
+            choice.get("delta") if isinstance(choice, dict) else None
+        )
         finish = getattr(choice, "finish_reason", None) or (
             choice.get("finish_reason") if isinstance(choice, dict) else None
         )
         if delta is not None:
-            content = getattr(delta, "content", None) or (delta.get("content") if isinstance(delta, dict) else None)
+            content = getattr(delta, "content", None) or (
+                delta.get("content") if isinstance(delta, dict) else None
+            )
             if content:
                 yield StreamEvent(type="text_delta", delta=content)
             tool_calls = getattr(delta, "tool_calls", None) or (
@@ -249,12 +265,18 @@ async def _convert_chunk(chunk: Any, active_calls: dict[int, str]) -> AsyncItera
                     if idx is None and isinstance(tc, dict):
                         idx = tc.get("index", 0)
                     idx = idx or 0
-                    tcid = getattr(tc, "id", None) or (tc.get("id") if isinstance(tc, dict) else None)
-                    fn = getattr(tc, "function", None) or (tc.get("function") if isinstance(tc, dict) else None)
+                    tcid = getattr(tc, "id", None) or (
+                        tc.get("id") if isinstance(tc, dict) else None
+                    )
+                    fn = getattr(tc, "function", None) or (
+                        tc.get("function") if isinstance(tc, dict) else None
+                    )
                     name = None
                     args_delta = None
                     if fn is not None:
-                        name = getattr(fn, "name", None) or (fn.get("name") if isinstance(fn, dict) else None)
+                        name = getattr(fn, "name", None) or (
+                            fn.get("name") if isinstance(fn, dict) else None
+                        )
                         args_delta = getattr(fn, "arguments", None) or (
                             fn.get("arguments") if isinstance(fn, dict) else None
                         )

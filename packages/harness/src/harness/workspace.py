@@ -9,6 +9,7 @@ workspace (the directory itself). All scope-aware lookups return paths in
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,10 +72,8 @@ class WorkspaceContext:
         for scope in self._scope_dirs_general_to_specific():
             md = scope / "AGENTS.md"
             if md not in seen and md.is_file():
-                try:
+                with contextlib.suppress(OSError):
                     results.append((md, md.read_text(encoding="utf-8")))
-                except OSError:
-                    pass
                 seen.add(md)
         return results
 

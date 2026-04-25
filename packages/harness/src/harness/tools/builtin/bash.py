@@ -9,6 +9,7 @@ defer sandbox providers."
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from pathlib import Path
 
@@ -16,21 +17,38 @@ from pydantic import BaseModel, Field
 
 from pyharness import Tool, ToolContext, safe_path
 
-
 # Patterns are checked against the raw command string. Each is a regex that
 # matches "definitely catastrophic." Keep the list short — false positives
 # are worse than false negatives here, since the agent will retry around
 # any false positive and the user will see it.
 _HARD_BLOCKS: list[tuple[str, re.Pattern[str]]] = [
-    ("rm -rf /", re.compile(r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+/(?:\s|$|\*|\.)")),
-    ("rm -rf ~", re.compile(r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+~(?:/|\s|$)")),
-    ("rm -rf $HOME", re.compile(r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+\$HOME\b")),
+    (
+        "rm -rf /",
+        re.compile(
+            r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+/(?:\s|$|\*|\.)"
+        ),
+    ),
+    (
+        "rm -rf ~",
+        re.compile(
+            r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+~(?:/|\s|$)"
+        ),
+    ),
+    (
+        "rm -rf $HOME",
+        re.compile(
+            r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+\$HOME\b"
+        ),
+    ),
     ("fork bomb", re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:")),
     ("dd to raw device", re.compile(r"\bdd\b[^|;]*\bof=/dev/(?:sd[a-z]|nvme\d|hd[a-z]|xvd[a-z])")),
     ("mkfs on device", re.compile(r"\bmkfs(?:\.\w+)?\s+/dev/(?:sd[a-z]|nvme\d|hd[a-z]|xvd[a-z])")),
     ("redirect to raw device", re.compile(r">\s*/dev/(?:sd[a-z]|nvme\d|hd[a-z]|xvd[a-z])")),
     ("chmod -R 777 /", re.compile(r"\bchmod\s+-R\s+0*777\s+/(?:\s|$)")),
-    ("chown -R on system path", re.compile(r"\bchown\s+-R\b[^|;]*\s+/(?:\s|$|etc|usr|bin|sbin|var|lib)\b")),
+    (
+        "chown -R on system path",
+        re.compile(r"\bchown\s+-R\b[^|;]*\s+/(?:\s|$|etc|usr|bin|sbin|var|lib)\b"),
+    ),
 ]
 
 
@@ -59,10 +77,7 @@ class BashTool(Tool):
     async def execute(self, args: BashArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         block = check_hard_blocks(args.command)
         if block is not None:
-            return (
-                f"Blocked: command matches catastrophic destruction pattern "
-                f"({block})."
-            )
+            return f"Blocked: command matches catastrophic destruction pattern ({block})."
 
         cwd_path: Path
         if args.cwd:
@@ -79,14 +94,10 @@ class BashTool(Tool):
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=args.timeout
-            )
-        except asyncio.TimeoutError:
-            try:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=args.timeout)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
                 proc.kill()
-            except ProcessLookupError:
-                pass
             await proc.wait()
             return f"Command timed out after {args.timeout}s: {args.command}"
 

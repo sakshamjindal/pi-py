@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from pyharness import ToolContext, execute_tool
 from harness import builtin_tool_names
 from harness.tools.builtin.bash import BashTool, check_hard_blocks
 from harness.tools.builtin.edit import EditTool
@@ -14,6 +13,7 @@ from harness.tools.builtin.glob_tool import GlobTool
 from harness.tools.builtin.grep import GrepTool
 from harness.tools.builtin.read import ReadTool
 from harness.tools.builtin.write import WriteTool
+from pyharness import ToolContext, execute_tool
 
 
 def _ctx(workspace: Path) -> ToolContext:
@@ -22,13 +22,24 @@ def _ctx(workspace: Path) -> ToolContext:
 
 def test_builtins_count():
     names = builtin_tool_names()
-    assert set(names) == {"read", "write", "edit", "bash", "grep", "glob", "web_search", "web_fetch"}
+    assert set(names) == {
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "grep",
+        "glob",
+        "web_search",
+        "web_fetch",
+    }
 
 
 @pytest.mark.asyncio
 async def test_read_and_write(tmp_path):
     ctx = _ctx(tmp_path)
-    write_result = await execute_tool(WriteTool(), {"path": "a.txt", "content": "alpha\nbeta\n"}, ctx)
+    write_result = await execute_tool(
+        WriteTool(), {"path": "a.txt", "content": "alpha\nbeta\n"}, ctx
+    )
     assert write_result.ok
     read_result = await execute_tool(ReadTool(), {"path": "a.txt"}, ctx)
     assert read_result.ok
@@ -57,9 +68,7 @@ async def test_edit_unique_replacement(tmp_path):
 async def test_edit_zero_or_multiple_matches(tmp_path):
     ctx = _ctx(tmp_path)
     (tmp_path / "f.txt").write_text("foo foo\n", encoding="utf-8")
-    res = await execute_tool(
-        EditTool(), {"path": "f.txt", "old_str": "foo", "new_str": "bar"}, ctx
-    )
+    res = await execute_tool(EditTool(), {"path": "f.txt", "old_str": "foo", "new_str": "bar"}, ctx)
     assert not res.ok
     res2 = await execute_tool(
         EditTool(), {"path": "f.txt", "old_str": "missing", "new_str": "x"}, ctx

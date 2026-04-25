@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from harness import load_extensions
 from pyharness import (
     EventBus,
     ExtensionAPI,
@@ -14,7 +15,6 @@ from pyharness import (
     LifecycleEvent,
     ToolRegistry,
 )
-from harness import load_extensions
 
 
 def _ctx() -> HandlerContext:

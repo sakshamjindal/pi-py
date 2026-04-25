@@ -31,16 +31,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace", type=Path, default=None)
     p.add_argument("--model", default=None)
     p.add_argument("--agent", default=None, help="Named agent to run.")
-    p.add_argument("-p", "--print", action="store_true", help="Print final output to stdout (default).")
+    p.add_argument(
+        "-p", "--print", action="store_true", help="Print final output to stdout (default)."
+    )
     p.add_argument("--json", action="store_true", help="Stream events as JSONL to stdout.")
     p.add_argument("--bare", action="store_true", help="Skip extensions, AGENTS.md, settings.")
-    p.add_argument("-c", "--continue", dest="continue_", action="store_true", help="Continue most recent session in cwd.")
+    p.add_argument(
+        "-c",
+        "--continue",
+        dest="continue_",
+        action="store_true",
+        help="Continue most recent session in cwd.",
+    )
     p.add_argument("-r", "--recent", action="store_true", help="List recent sessions for cwd.")
     p.add_argument("--session", default=None, help="Resume a specific session by id.")
     p.add_argument("--fork", default=None, help="Fork a session by id.")
-    p.add_argument("--at-event", type=int, default=None, help="With --fork: fork at this event sequence.")
+    p.add_argument(
+        "--at-event", type=int, default=None, help="With --fork: fork at this event sequence."
+    )
     p.add_argument("--max-turns", type=int, default=None)
-    p.add_argument("--no-stream", action="store_true", help="Collect output before printing (off by default).")
+    p.add_argument(
+        "--no-stream", action="store_true", help="Collect output before printing (off by default)."
+    )
     p.add_argument("--quiet", action="store_true", help="Suppress non-final output.")
     # `pyharness sessions ...` is dispatched in main() before argparse runs.
     return p
@@ -149,7 +161,7 @@ def _attach_human_stream(agent: CodingAgent) -> None:
     async def on_tool_end(event, ctx):
         ok = event.payload.get("ok")
         if not ok:
-            sys.stderr.write(f"    [tool error]\n")
+            sys.stderr.write("    [tool error]\n")
         return None
 
     async def on_session_end(event, ctx):
@@ -198,9 +210,7 @@ def _list_sessions(cwd: Path, *, n: int, all_dirs: bool) -> int:
         sys.stderr.write("(no sessions)\n")
         return 0
     for s in sessions:
-        sys.stdout.write(
-            f"{s.session_id}  {s.model or '?':30s}  {s.cwd}\n"
-        )
+        sys.stdout.write(f"{s.session_id}  {s.model or '?':30s}  {s.cwd}\n")
     return 0
 
 

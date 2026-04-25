@@ -12,7 +12,6 @@ from pathlib import Path
 
 from pyharness import ExtensionAPI, HookOutcome
 
-
 _AUDIT_FILE_NAME = "audit.jsonl"
 
 

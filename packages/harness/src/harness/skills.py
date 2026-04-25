@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -131,10 +132,8 @@ class LoadSkillTool(Tool):
                     self._registry.replace(tool.name, tool)
 
         if self._on_load is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._on_load(skill, added)
-            except Exception:
-                pass
 
         return LoadSkillResult(
             loaded=True,
@@ -146,5 +145,3 @@ class LoadSkillTool(Tool):
                 "and proceed."
             ),
         )
-
-

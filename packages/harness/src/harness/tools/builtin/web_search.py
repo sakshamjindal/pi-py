@@ -33,7 +33,9 @@ class WebSearchTool(Tool):
     async def execute(self, args: WebSearchArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         settings = ctx.settings
         provider = (getattr(settings, "search_provider", None) if settings else None) or "brave"
-        env_key = (getattr(settings, "search_api_key_env", None) if settings else None) or "BRAVE_API_KEY"
+        env_key = (
+            getattr(settings, "search_api_key_env", None) if settings else None
+        ) or "BRAVE_API_KEY"
         api_key = os.environ.get(env_key)
         if not api_key:
             return (
@@ -63,7 +65,9 @@ async def _brave(client: httpx.AsyncClient, key: str, args: WebSearchArgs) -> st
     resp.raise_for_status()
     data: dict[str, Any] = resp.json()
     web = (data.get("web") or {}).get("results") or []
-    return _format_results([(r.get("title", ""), r.get("url", ""), r.get("description", "")) for r in web])
+    return _format_results(
+        [(r.get("title", ""), r.get("url", ""), r.get("description", "")) for r in web]
+    )
 
 
 async def _tavily(client: httpx.AsyncClient, key: str, args: WebSearchArgs) -> str:
@@ -74,7 +78,9 @@ async def _tavily(client: httpx.AsyncClient, key: str, args: WebSearchArgs) -> s
     resp.raise_for_status()
     data: dict[str, Any] = resp.json()
     results = data.get("results") or []
-    return _format_results([(r.get("title", ""), r.get("url", ""), r.get("content", "")) for r in results])
+    return _format_results(
+        [(r.get("title", ""), r.get("url", ""), r.get("content", "")) for r in results]
+    )
 
 
 async def _exa(client: httpx.AsyncClient, key: str, args: WebSearchArgs) -> str:
@@ -86,7 +92,12 @@ async def _exa(client: httpx.AsyncClient, key: str, args: WebSearchArgs) -> str:
     resp.raise_for_status()
     data: dict[str, Any] = resp.json()
     results = data.get("results") or []
-    return _format_results([(r.get("title", ""), r.get("url", ""), r.get("text", "") or r.get("snippet", "")) for r in results])
+    return _format_results(
+        [
+            (r.get("title", ""), r.get("url", ""), r.get("text", "") or r.get("snippet", ""))
+            for r in results
+        ]
+    )
 
 
 def _format_results(triples: list[tuple[str, str, str]]) -> str:

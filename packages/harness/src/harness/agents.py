@@ -78,10 +78,9 @@ def _collect_project_tools(workspace: WorkspaceContext) -> dict[str, Tool]:
         if not d.is_dir():
             continue
         for entry in sorted(d.iterdir()):
-            if entry.is_file() and entry.suffix == ".py":
-                for tool in load_tools_from_module(entry):
-                    out[tool.name] = tool
-            elif entry.is_dir() and (entry / "__init__.py").is_file():
+            if (entry.is_file() and entry.suffix == ".py") or (
+                entry.is_dir() and (entry / "__init__.py").is_file()
+            ):
                 for tool in load_tools_from_module(entry):
                     out[tool.name] = tool
     return out

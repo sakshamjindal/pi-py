@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pyharness import LLMResponse
 from harness import cli
 from harness.coding_agent import CodingAgent
+from pyharness import LLMResponse
 
 
 def test_cli_runs_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, capsys):
@@ -12,9 +12,11 @@ def test_cli_runs_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, c
 
     def patched_init(self, config):
         real_init(self, config)
+
         # Replace the LLM with a one-shot completion that returns "ok".
         async def _complete(**_):
             return LLMResponse(text="ok")
+
         self.llm.complete = _complete  # type: ignore
 
     monkeypatch.setattr(CodingAgent, "__init__", patched_init)

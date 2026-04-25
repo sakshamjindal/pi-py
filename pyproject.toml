@@ -16,6 +16,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",
+    "ruff==0.15.12",
+    "pre-commit>=3.7",
 ]
 
 [tool.setuptools.packages.find]
@@ -27,3 +29,40 @@ testpaths = [
     "packages/pyharness-sdk/tests",
     "packages/harness/tests",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["build", "dist", ".venv", "venv", "*.egg-info"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # bugbear
+    "SIM",    # simplify
+    "RUF",    # ruff-specific
+    "C4",     # comprehensions
+    "PIE",    # misc lints
+]
+ignore = [
+    "E501",   # line-too-long (formatter handles long lines; long strings/URLs are fine)
+    "B008",   # function-call-in-default-argument (Pydantic Field(default_factory=...) is fine)
+    "SIM108", # ternary-in-if-else (sometimes the if/else is clearer)
+    "RUF012", # mutable-class-attributes (we use ClassVar-like patterns on purpose)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use bare asserts and re-import fixtures freely.
+"**/tests/**" = ["B011", "F401", "F811"]
+# Examples are illustrative; relax on naming and style.
+"examples/**" = ["F401", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pyharness", "harness", "pyharness_tui"]
+
+[tool.ruff.format]
+docstring-code-format = false
