@@ -4,21 +4,36 @@ A minimal Python agent harness for running LLM-driven agents on coding
 and (later) finance tasks. Headless-first. Multi-vendor LLM via LiteLLM.
 Plumbing, not a product.
 
-pyharness takes a prompt, calls an LLM, runs the tools the LLM asks for,
-loops until there are no tool calls left, and returns a result. Sessions
-are durable JSONL on disk. Tools live in Python.
+This repo is a pi-mono–style monorepo with three packages:
 
-## Install
+- **`packages/pyharness-sdk/`** — the SDK kernel. Agent loop, LLM
+  client, Tool ABC, sessions, queues, events, extension runtime.
+  Importable as `pyharness`.
+- **`packages/harness/`** — the coding-agent scaffolding on top of
+  the SDK: settings hierarchy, AGENTS.md walking, named sub-agents,
+  skills, extensions discovery, the eight built-in tools, and the
+  `pyharness` CLI.
+- **`packages/tui/`** — placeholder for a future TUI. Intentionally
+  empty in v1.
+
+The SDK exposes only the pure agent loop, mirroring pi-mono's
+`packages/agent`. The `harness` package mirrors pi-mono's
+`packages/coding-agent`.
+
+## Install (development)
 
 ```bash
 git clone <this repo>
 cd py-harness
-pip install -e ".[dev]"
+
+pip install -e packages/pyharness-sdk \
+            -e packages/harness \
+            -e packages/tui \
+            -e ".[dev]"
 ```
 
 Set a provider key in your environment for whichever model you plan to
-use (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). LiteLLM picks up
-provider keys automatically.
+use (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
 
 ## Quick start (CLI)
 
@@ -48,28 +63,61 @@ pyharness sessions show <id>
 pyharness sessions replay <id>
 ```
 
-## Quick start (SDK)
+## Quick start (SDK kernel)
+
+Use the kernel directly when you want full control over the system
+prompt, tool registry, and assembly:
 
 ```python
 import asyncio
-from pyharness import Harness, HarnessConfig
+from pathlib import Path
+
+from pyharness import (
+    Agent, AgentOptions, EventBus, LLMClient, Session, ToolRegistry,
+)
 
 async def main():
-    harness = Harness(HarnessConfig(
-        workspace="/tmp/scratch",
-        model="claude-opus-4-7",
-    ))
-    result = await harness.run("create hello.txt with the word 'hi'")
+    options = AgentOptions(model="claude-opus-4-7", max_turns=10)
+    workspace = Path.cwd()
+    agent = Agent(
+        options,
+        system_prompt="You are a minimal echo agent.",
+        tool_registry=ToolRegistry(),
+        session=Session.new(workspace),
+        event_bus=EventBus(),
+        workspace=workspace,
+        llm=LLMClient(),
+    )
+    result = await agent.run("hello")
     print(result.final_output)
-    print("session:", result.session_id)
 
 asyncio.run(main())
 ```
 
-To steer or follow up while a run is in flight, use `harness.start(...)`:
+## Quick start (harness scaffolding)
+
+If you want pyharness's coding-agent defaults — settings.json, AGENTS.md,
+named agents, skills, built-in tools — use the `harness` package:
 
 ```python
-handle = harness.start("deep research on X")
+import asyncio
+from harness import CodingAgent, CodingAgentConfig
+
+async def main():
+    agent = CodingAgent(CodingAgentConfig(
+        workspace="/tmp/scratch",
+        model="claude-opus-4-7",
+    ))
+    result = await agent.run("create hello.txt with 'hi'")
+    print(result.final_output)
+
+asyncio.run(main())
+```
+
+To steer or follow up while a run is in flight, use `agent.start(...)`:
+
+```python
+handle = agent.start("deep research on X")
 await handle.steer("also check Y")
 result = await handle.wait()
 ```
@@ -77,25 +125,17 @@ result = await handle.wait()
 ## Concepts
 
 - **Workspace** — the working directory for the agent. Chosen with
-  `--workspace` (CLI) or `HarnessConfig.workspace` (SDK). Defaults to
-  cwd.
+  `--workspace` (CLI) or `CodingAgentConfig.workspace` (programmatic).
 - **Project root** — the nearest ancestor of the workspace containing a
   `.pyharness/` directory. Project-scope settings, agents, skills, and
   extensions live here.
 - **Named agents** — Markdown files with YAML frontmatter at
-  `<scope>/.pyharness/agents/<name>.md`. They declare model, tools,
-  default workdir, and the system prompt body. Invoke with
-  `--agent <name>`.
+  `<scope>/.pyharness/agents/<name>.md`. Invoke with `--agent <name>`.
 - **Skills** — on-demand capability bundles at
-  `<scope>/.pyharness/skills/<name>/{SKILL.md,tools.py}`. The agent
-  calls the `load_skill` tool when its description matches the task,
-  which injects instructions and registers the skill's tools.
+  `<scope>/.pyharness/skills/<name>/{SKILL.md,tools.py}`.
 - **Extensions** — Python modules at `<scope>/.pyharness/extensions/`.
-  They subscribe to lifecycle events (e.g. `before_llm_call`,
-  `after_tool_call`) and can deny, modify, or replace outcomes.
 - **Sessions** — every run writes a JSONL log to
-  `~/.pyharness/sessions/<cwd-hash>/<session-id>.jsonl`. The log is the
-  durable record of what happened and is replayable.
+  `~/.pyharness/sessions/<cwd-hash>/<session-id>.jsonl`.
 
 ## Configuration (`settings.json`)
 
@@ -105,21 +145,7 @@ Locations, in merge order (later wins):
 2. `<project>/.pyharness/settings.json` (project)
 3. CLI flags
 
-Example:
-
-```json
-{
-  "default_model": "claude-opus-4-7",
-  "summarization_model": "claude-haiku-4-5",
-  "max_turns": 100,
-  "compaction_threshold_pct": 0.8,
-  "search_provider": "brave",
-  "search_api_key_env": "BRAVE_API_KEY",
-  "fetch_timeout_seconds": 30
-}
-```
-
-See `pyharness.config.Settings` for the full list of keys and defaults.
+See `harness.config.Settings` for the full list of keys.
 
 ## Built-in tools
 
@@ -141,13 +167,16 @@ See `pyharness.config.Settings` for the full list of keys and defaults.
 
 ## Design
 
-See `DESIGN.md` for the design principles, explicit refusals (TUI, plan
-mode, MultiEdit, MCP, …), the architecture overview, and what we
-borrowed from Claude Code and pi.
+See `DESIGN.md` for design principles, explicit refusals (TUI in core,
+plan mode, MultiEdit, MCP, …), the architecture overview, and what
+we borrowed from Claude Code and pi.
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e packages/pyharness-sdk \
+            -e packages/harness \
+            -e packages/tui \
+            -e ".[dev]"
 pytest -q
 ```
