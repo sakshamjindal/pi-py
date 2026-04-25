@@ -36,9 +36,12 @@ extension, not in core."
 These features are rejected by design. If a future need genuinely
 requires one, it lands as an extension, not as core code.
 
-- **TUI** of any kind. The harness is for programmatic invocation; a
-  TUI is a different product and would make the loop's behaviour depend
-  on terminal state.
+- **TUI in the SDK or harness package.** The agent loop must remain
+  programmatic; its behaviour cannot depend on terminal state. A TUI
+  is allowed only as a **separate package** (`packages/tui/`,
+  importable as `pyharness_tui`) that subscribes to the event bus and
+  renders — never threading back into the SDK or harness layers. The
+  SDK and harness packages stay headless.
 - **Interactive permission prompts.** Tools execute or fail. Approval
   gates would block scheduled and SDK-driven runs.
 - **In-loop sub-agent delegation** (Task tool, delegate tool). Multi-

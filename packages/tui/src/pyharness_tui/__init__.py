@@ -1,9 +1,12 @@
-"""pyharness-tui — reserved package slot for an out-of-tree TUI.
+"""pyharness-tui — minimal rich-formatted TUI for the coding agent.
 
-Headless-first is a core design principle (see DESIGN.md). The TUI
-lives in its own package so it can be developed without touching the
-SDK or coding-agent scaffolding. This module is intentionally empty
-in v1.
+Subscribes to the existing event bus and renders prompts, tool calls,
+and final results with rich panels and colors. Loop behaviour is
+unaffected — the TUI is a passive observer (see DESIGN.md).
 """
 
+from .app import TuiRenderer, run_tui
+
 __version__ = "0.1.0"
+
+__all__ = ["TuiRenderer", "run_tui", "__version__"]

@@ -13,8 +13,10 @@ This repo is a pi-mono–style monorepo with three packages:
   the SDK: settings hierarchy, AGENTS.md walking, named sub-agents,
   skills, extensions discovery, the eight built-in tools, and the
   `pyharness` CLI.
-- **`packages/tui/`** — placeholder for a future TUI. Intentionally
-  empty in v1.
+- **`packages/tui/`** — minimal rich-formatted TUI. Importable as
+  `pyharness_tui`; ships the `pyharness-tui` console-script. A
+  passive renderer that subscribes to the event bus — never threads
+  back into the SDK or harness packages.
 
 The SDK exposes only the pure agent loop, mirroring pi-mono's
 `packages/agent`. The `harness` package mirrors pi-mono's
@@ -62,6 +64,17 @@ pyharness sessions ls
 pyharness sessions show <id>
 pyharness sessions replay <id>
 ```
+
+## Quick start (TUI)
+
+```bash
+pyharness-tui "fix the failing tests"
+pyharness-tui --model claude-opus-4-7 --bare "summarise this directory"
+```
+
+Same agent loop as `pyharness`, with rich-formatted panels for the
+prompt, per-turn dividers, colored tool-call traces, and a result
+panel.
 
 ## Quick start (SDK kernel)
 
