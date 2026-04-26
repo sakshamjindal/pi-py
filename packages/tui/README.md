@@ -1,20 +1,20 @@
 # pyharness-tui
 
 The most minimal TUI: a stdlib-only REPL for dogfooding the bundled
-[`harness`](../harness/) coding agent.
+[`coding-harness`](../coding-harness/) coding agent.
 
 Read a line → run the agent in the current workspace → print the
 result → repeat. Tool calls are traced to stderr as `  → <name>`.
 
 Loop behaviour is unaffected: the TUI is a passive subscriber to the
 event bus. See [`DESIGN.md`](../../DESIGN.md) for why it lives in a
-separate package rather than inside the SDK or harness layers.
+separate package rather than inside the SDK or coding-harness layers.
 
 ## Install
 
 ```bash
 pip install -e packages/pyharness-sdk \
-            -e packages/harness \
+            -e packages/coding-harness \
             -e packages/tui
 ```
 
@@ -38,4 +38,4 @@ In the REPL, type `exit` / `quit` or hit Ctrl-D to leave.
   `settings.json` and the cwd.
 
 If you want richer rendering, build a separate package alongside this
-one. The kernel and harness packages must stay terminal-independent.
+one. The kernel and coding-harness packages must stay terminal-independent.

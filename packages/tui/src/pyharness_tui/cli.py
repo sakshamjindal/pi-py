@@ -14,7 +14,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from harness import CodingAgent, CodingAgentConfig
+from coding_harness import CodingAgent, CodingAgentConfig
 
 
 def _attach_trace(agent: CodingAgent) -> None:

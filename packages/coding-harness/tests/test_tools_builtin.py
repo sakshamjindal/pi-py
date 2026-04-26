@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from harness import builtin_tool_names
-from harness.tools.builtin.bash import BashTool, check_hard_blocks
-from harness.tools.builtin.edit import EditTool
-from harness.tools.builtin.glob_tool import GlobTool
-from harness.tools.builtin.grep import GrepTool
-from harness.tools.builtin.read import ReadTool
-from harness.tools.builtin.write import WriteTool
+from coding_harness import builtin_tool_names
+from coding_harness.tools.builtin.bash import BashTool, check_hard_blocks
+from coding_harness.tools.builtin.edit import EditTool
+from coding_harness.tools.builtin.glob_tool import GlobTool
+from coding_harness.tools.builtin.grep import GrepTool
+from coding_harness.tools.builtin.read import ReadTool
+from coding_harness.tools.builtin.write import WriteTool
 from pyharness import ToolContext, execute_tool
 
 

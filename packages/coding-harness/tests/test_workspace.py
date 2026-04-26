@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from harness import WorkspaceContext
+from coding_harness import WorkspaceContext
 
 
 def test_discover_project_root(tmp_path):

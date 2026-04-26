@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 
-from harness.coding_agent import CodingAgent
+from coding_harness.coding_agent import CodingAgent
 from pyharness import LLMResponse
 
 
