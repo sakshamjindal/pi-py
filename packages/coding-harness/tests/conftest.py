@@ -1,4 +1,4 @@
-"""Harness-level pytest fixtures."""
+"""Coding-harness pytest fixtures."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ import pytest
 # Ensure both packages' src/ directories are importable when tests run
 # without an editable install.
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-HARNESS_SRC = ROOT / "packages" / "harness" / "src"
+CODING_HARNESS_SRC = ROOT / "packages" / "coding-harness" / "src"
 SDK_SRC = ROOT / "packages" / "pyharness-sdk" / "src"
-for path in (SDK_SRC, HARNESS_SRC):
+for path in (SDK_SRC, CODING_HARNESS_SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 

@@ -1,8 +1,8 @@
 """TUI-package pytest fixtures.
 
 Adds all three package src/ directories to sys.path so tests can
-import `pyharness`, `harness`, and `pyharness_tui` even without an
-editable install.
+import `pyharness`, `coding_harness`, and `pyharness_tui` even
+without an editable install.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 for path in (
     ROOT / "packages" / "pyharness-sdk" / "src",
-    ROOT / "packages" / "harness" / "src",
+    ROOT / "packages" / "coding-harness" / "src",
     ROOT / "packages" / "tui" / "src",
 ):
     if str(path) not in sys.path:
