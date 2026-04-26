@@ -188,6 +188,52 @@ async def test_load_skill_injects_instructions(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_load_skill_picks_up_skills_installed_mid_run(tmp_path):
+    """A skill that lands on disk AFTER the agent's setup must still be
+    loadable via ``load_skill`` on the next call. Simulates the user
+    running a bash install command mid-session."""
+
+    home, workspace = _setup_project(tmp_path)
+    skills_dir = home / "p" / ".pyharness" / "skills"
+    skills_dir.mkdir(parents=True)
+
+    # Initially: no skills on disk.
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    reg = ToolRegistry()
+
+    def _live_provider():
+        return discover_skills(ctx)
+
+    tool = LoadSkillTool(_live_provider, reg)
+
+    # First call — skill doesn't exist yet.
+    res = await tool.execute(
+        tool.args_schema(name="late-arrival"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    assert res.loaded is False
+    assert "Unknown skill" in res.message
+
+    # Mid-run, a skill is installed (e.g. by a bash tool call to
+    # `npx skills add ...`).
+    sd = skills_dir / "late-arrival"
+    sd.mkdir(parents=True)
+    (sd / "SKILL.md").write_text(
+        "---\nname: late-arrival\ndescription: dropped in mid-run\n---\nLATE_BODY",
+        encoding="utf-8",
+    )
+
+    # Second call — same tool instance, new skill on disk. Must be found.
+    res2 = await tool.execute(
+        tool.args_schema(name="late-arrival"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    assert res2.loaded is True
+    assert "LATE_BODY" in res2.instructions
+    assert "late-arrival" in tool.loaded_names
+
+
+@pytest.mark.asyncio
 async def test_load_skill_runs_bundle_hooks(tmp_path):
     """A skill bundle (SKILL.md + tools.py + hooks.py) must invoke
     ``hooks.py:register(api)`` when activated, but only if an

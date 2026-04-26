@@ -273,6 +273,12 @@ tool dynamically imports the skill's `tools.py`, registers its tools
 into the live registry, runs `hooks.py:register(api)` if present,
 and returns the SKILL.md body as instructions.
 
+**Live discovery.** `load_skill` re-walks the filesystem and entry
+points on every call, so a skill installed mid-run (e.g. via a bash
+call to `npx skills add ...`) is loadable on the very next call
+without restarting the agent. Named-agent `skills:` allowlists still
+apply — the contract holds even for newly-installed skills.
+
 ```markdown
 ---
 name: market-data

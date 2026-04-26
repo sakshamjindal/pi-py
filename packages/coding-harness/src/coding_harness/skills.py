@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -173,11 +174,21 @@ class LoadSkillTool(Tool):
 
     def __init__(
         self,
-        skills: dict[str, SkillDefinition],
+        skills: dict[str, SkillDefinition] | Callable[[], dict[str, SkillDefinition]],
         registry: ToolRegistry,
         on_load: Any = None,
     ):
-        self._skills = skills
+        # ``skills`` may be either a fixed dict (the historical shape;
+        # tests still pass dicts) or a 0-arg callable that returns the
+        # current skill dict on every invocation. The callable form
+        # enables live re-discovery so that a skill installed mid-run
+        # (e.g. via ``npx skills add ...`` from a bash tool call) becomes
+        # loadable without restarting the agent.
+        if callable(skills):
+            self._provider: Callable[[], dict[str, SkillDefinition]] = skills
+        else:
+            _frozen = skills
+            self._provider = lambda: _frozen
         self._registry = registry
         self._on_load = on_load
         # Names of skills that have been loaded in this session. Memoized
@@ -185,12 +196,19 @@ class LoadSkillTool(Tool):
         # loaded/available state without scanning session events.
         self.loaded_names: set[str] = set()
 
+    @property
+    def _skills(self) -> dict[str, SkillDefinition]:
+        """Backwards-compatible accessor — returns the current skills dict."""
+
+        return self._provider()
+
     async def execute(self, args: _LoadSkillArgs, ctx: ToolContext):  # type: ignore[override]
-        skill = self._skills.get(args.name)
+        skills = self._provider()  # live re-walk on each call
+        skill = skills.get(args.name)
         if skill is None:
             return LoadSkillResult(
                 loaded=False,
-                message=f"Unknown skill: {args.name!r}. Known: {sorted(self._skills.keys())}",
+                message=f"Unknown skill: {args.name!r}. Known: {sorted(skills.keys())}",
             )
 
         added: list[str] = []

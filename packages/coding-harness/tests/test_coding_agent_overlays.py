@@ -241,6 +241,68 @@ def test_no_project_root_bare_mode_succeeds(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_named_agent_allowlist_blocks_mid_run_skill(tmp_path, monkeypatch):
+    """Live discovery must still respect the named agent's allowlist.
+
+    A skill installed mid-run that isn't on the agent's `skills:` list
+    must still be rejected by `load_skill`. The contract holds.
+    """
+
+    from pyharness import ToolContext
+
+    home, workspace = _setup_workspace_with_extensions(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+
+    skills_dir = home / "p" / ".pyharness" / "skills"
+    (skills_dir / "alpha").mkdir(parents=True)
+    (skills_dir / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: alpha\n---\nbody",
+        encoding="utf-8",
+    )
+
+    agents_dir = home / "p" / ".pyharness" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "narrow.md").write_text(
+        textwrap.dedent(
+            """
+            ---
+            name: narrow
+            skills: [alpha]
+            ---
+            body
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    agent = CodingAgent(
+        _basic_config(workspace, project_root=home / "p", agent_name="narrow")
+    )
+
+    # Drop a new skill mid-run — outside the allowlist.
+    (skills_dir / "beta").mkdir(parents=True)
+    (skills_dir / "beta" / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: beta\n---\nbody",
+        encoding="utf-8",
+    )
+
+    res = await agent.load_skill_tool.execute(
+        agent.load_skill_tool.args_schema(name="beta"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    # Live discovery sees beta on disk, but the allowlist filters it out.
+    assert res.loaded is False
+    assert "beta" in res.message  # error message mentions the rejected name
+
+    # Alpha (on the allowlist) is still loadable.
+    res2 = await agent.load_skill_tool.execute(
+        agent.load_skill_tool.args_schema(name="alpha"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    assert res2.loaded is True
+
+
+@pytest.mark.asyncio
 async def test_named_agent_tools_frontmatter_keeps_builtins(tmp_path, monkeypatch):
     """Listing a small tools list in frontmatter must not strip builtins."""
 

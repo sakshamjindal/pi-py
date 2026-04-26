@@ -166,15 +166,29 @@ class CodingAgent:
     def _setup(self) -> None:
         self._build_tool_registry()
 
-        # Skills: discover (cheap) then filter by allowlist, then merge
-        # programmatic extras on top.
-        discovered = discover_skills(self.workspace_ctx)
+        # Build a closure that re-discovers skills on every call. This
+        # makes ``load_skill`` see skills installed mid-run (e.g. via a
+        # bash call to ``npx skills add ...``) without requiring the
+        # user to restart the agent. The named-agent allowlist and
+        # programmatic ``extra_skills`` are re-applied on every call,
+        # so the contract is preserved.
         skill_allow = self._resolve_skills_allowlist()
-        if skill_allow is not None:
-            discovered = {k: v for k, v in discovered.items() if k in skill_allow}
-        for sd in self.config.extra_skills:
-            discovered[sd.name] = sd
-        self.skills = discovered
+        extra_skills = list(self.config.extra_skills)
+
+        def _live_skills() -> dict[str, SkillDefinition]:
+            found = discover_skills(self.workspace_ctx)
+            if skill_allow is not None:
+                found = {k: v for k, v in found.items() if k in skill_allow}
+            for sd in extra_skills:
+                found[sd.name] = sd
+            return found
+
+        # Initial snapshot for system prompt rendering. The system
+        # prompt is built once at setup so this is the catalog the
+        # model sees in its index. Newly-installed skills won't be
+        # listed here, but the model can still reach them by name
+        # (e.g. from the install tool's stdout).
+        self.skills = _live_skills()
 
         # Programmatic always-on tools (extras win over duplicates).
         for tool in self.config.extra_tools:
@@ -186,7 +200,7 @@ class CodingAgent:
         # Register the load_skill tool last so the registry already
         # contains the agent's other tools.
         self.load_skill_tool = LoadSkillTool(
-            self.skills, self.tool_registry, on_load=self._on_skill_loaded
+            _live_skills, self.tool_registry, on_load=self._on_skill_loaded
         )
         self.tool_registry.register(self.load_skill_tool)
         self.system_prompt = self._build_system_prompt()
