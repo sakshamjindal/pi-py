@@ -5,6 +5,15 @@ architecture for pyharness. Treat the refusals list as the answer key
 for "should we add X?": if X is on the list, the answer is "as an
 extension, not in core."
 
+> **Comparable projects:** [pi-mono](https://github.com/badlogic/pi-mono)
+> (TypeScript) — the runtime-semantics inspiration; [Claude
+> Code](https://docs.claude.com/en/docs/claude-code) — the file-format
+> inspiration (frontmatter agents, SKILL.md); the
+> [agentskills.io](https://agentskills.io/) standard — the SKILL.md
+> spec we adopt; [AGENTS.md](https://agents.md/) — the cross-vendor
+> guidance file pyharness reads from every directory between the
+> project root and the workspace.
+
 ## Design principles
 
 1. **Headless-first.** Programmatic invocation (CLI + SDK) is canonical.
