@@ -70,58 +70,118 @@ requires one, it lands as an extension, not as core code.
 
 ## Architecture
 
+The repo is a pi-mono–style monorepo with three packages. The split
+mirrors pi-mono: a small kernel (`pyharness-sdk`, like
+`packages/agent`) plus one concrete application built on it
+(`coding-harness`, like `packages/coding-agent`) plus a separate TUI
+package.
+
 ```
-+---------------------+    +-----------------+    +---------------+
-| CLI / SDK           |--->| Harness loop    |--->| LiteLLM       |
-| (cli.py / __init__) |    | (harness.py)    |    | (llm.py)      |
-+---------------------+    +-----------------+    +---------------+
-                              |       |
-                              v       v
-                  +----------------+  +----------------+
-                  | Tool registry  |  | Event bus      |
-                  | (tools/base)   |  | (extensions)   |
-                  +----------------+  +----------------+
-                              |
-                              v
-                  +-------------------+
-                  | Session log JSONL |
-                  | (session.py)      |
-                  +-------------------+
++--------------------+        +--------------------+        +------------+
+| coding-harness CLI |  -->   | CodingAgent        |  -->   | Agent loop |
+| (pyharness "task") |        | (assembly layer)   |        | (kernel)   |
++--------------------+        +--------------------+        +------------+
+                                       |                          |
+                                       v                          v
+                          +-----------------------+   +----------------------+
+                          | Settings + Workspace  |   | LLMClient (LiteLLM)  |
+                          | + AGENTS.md + Skills  |   +----------------------+
+                          | + Sub-agents + Tools  |              |
+                          | + Extensions loader   |              v
+                          +-----------------------+   +----------------------+
+                                                      | ToolRegistry         |
+                                                      | (Pydantic-validated) |
+                                                      +----------------------+
+                                                                 |
+                                                                 v
+                                                      +----------------------+
+                                                      | EventBus             |
+                                                      | (extension hooks)    |
+                                                      +----------------------+
+                                                                 |
+                                                                 v
+                                                      +----------------------+
+                                                      | Session JSONL log    |
+                                                      | (durable record)     |
+                                                      +----------------------+
 ```
 
-Subsystems:
+### `pyharness-sdk` (kernel — package `pyharness`)
 
-- **`llm.py`** — thin LiteLLM wrapper. Streaming canonical; non-stream
-  is sugar that consumes the stream. Anthropic prompt caching is
-  applied when the model is a Claude/Anthropic model.
-- **`tools/`** — `Tool` ABC, `ToolRegistry`, `ToolContext`, OpenAI-shape
-  schema generator. `tools/builtin/` ships the eight defaults plus
-  `load_skill`.
-- **`workspace.py`** — discovers project root (nearest ancestor with
-  `.pyharness/`), walks AGENTS.md in most-general-first order, and
-  collects `<scope>/.pyharness/{agents,skills,tools,extensions}` dirs.
+The loop and its primitives. No file conventions, no settings, no
+CLI. This is what a domain-specific harness builds on.
+
+- **`loop.py`** — `Agent` and `AgentOptions`. The straight-line loop:
+  drain steering / follow-up queues, maybe compact, call LLM, execute
+  tools (checking steering between calls), repeat until the LLM
+  returns no tool calls or `max_turns` is hit. `Agent.start()`
+  returns an `AgentHandle` for live steering; `Agent.run()` is the
+  blocking equivalent.
+- **`llm.py`** — thin LiteLLM wrapper. Streaming canonical;
+  non-stream is sugar that consumes the stream. Anthropic prompt
+  caching is applied when the model is a Claude / Anthropic model.
+- **`tools/base.py`** — `Tool` ABC, `ToolRegistry`, `ToolContext`,
+  OpenAI-shape schema generator. `execute_tool` validates args via
+  Pydantic; failures and exceptions become `ok=False` results so the
+  loop hands them back to the LLM rather than crashing.
+- **`session.py`** — append-only JSONL log with atomic writes.
+  Supports resume and fork by event sequence number. Reconstructs LLM
+  message history from the log on resume.
+- **`events.py`** — typed event payloads; the union of session-log
+  events (`SessionStartEvent`, `ToolCallEndEvent`, …) and lifecycle
+  events (`LifecycleEvent`).
+- **`extensions.py`** — `EventBus`, `ExtensionAPI`, `HookOutcome`,
+  `HookResult`, `HandlerContext`. First non-Continue outcome wins;
+  extension exceptions are logged and skipped. The file-discovery
+  loader does NOT live here (it's a coding-harness concern).
+- **`compaction.py`** — `Compactor`. Keeps system + last N messages;
+  summarises the middle via the cheaper `summarization_model`.
+- **`queues.py`** — `MessageQueue` and `AgentHandle` for steering and
+  follow-up.
+- **`types.py`** — `Message`, `ToolCall`, `LLMResponse`, `RunResult`,
+  `TokenUsage`, `StreamEvent`. All Pydantic.
+
+### `coding-harness` (application — package `coding_harness`)
+
+Reads settings, walks AGENTS.md, discovers skills, loads extensions,
+builds a tool registry, constructs a `pyharness.Agent`. One concrete
+harness built on the kernel — same recipe applies to a finance or
+autoresearch harness.
+
+- **`coding_agent.py`** — `CodingAgent`, `CodingAgentConfig`, the
+  `BASE_SYSTEM_PROMPT`. The assembly layer: `__init__` reads
+  settings → resolves the named agent (or falls back to all
+  built-ins) → discovers skills → registers `load_skill` →
+  renders the system prompt → builds the `EventBus` and loads
+  extensions → maps `Settings` to `AgentOptions` → instantiates
+  `pyharness.Agent`.
 - **`config.py`** — `Settings` Pydantic model loaded from personal +
   project + CLI overrides.
-- **`session.py`** — append-only JSONL with atomic writes. Supports
-  resume and fork by event sequence number. Reconstructs LLM message
-  history from the log.
-- **`events.py`** — typed event payloads; the union of session-log
-  events and lifecycle events.
-- **`extensions.py`** — `EventBus`, `ExtensionAPI`, `HookOutcome`,
-  loader. First non-Continue outcome wins; extension exceptions are
-  logged and skipped.
+- **`workspace.py`** — discovers project root (nearest ancestor with
+  `.pyharness/`), walks AGENTS.md in most-general-first order, and
+  collects `<scope>/.pyharness/{agents,skills,tools,extensions}`
+  dirs.
 - **`agents.py`** — frontmatter parser, agent discovery, tool
   resolution. Resolves declared tool names against builtins → project
   tools → skill tools.
 - **`skills.py`** — `SkillDefinition`, discovery, the `load_skill`
   built-in tool.
-- **`compaction.py`** — keeps system + last N messages; summarises the
-  middle via the cheaper `summarization_model`.
-- **`queues.py`** — `MessageQueue` and `HarnessHandle` for steering and
-  follow-up.
-- **`harness.py`** — the loop. Drains queues, maybe compacts, calls
-  LLM, executes tools (checking the steering queue between each), loops.
-- **`cli.py`** — argparse front-end.
+- **`extensions_loader.py`** — file walker that imports each
+  `<scope>/.pyharness/extensions/<name>.py` and calls its
+  `register(api)`.
+- **`_loader.py`** — shared dynamic-import helper for tools and skill
+  modules.
+- **`tools/builtin/`** — the eight defaults: `read`, `write`, `edit`,
+  `bash` (with hard-blocks), `grep`, `glob`, `web_search`,
+  `web_fetch`.
+- **`cli.py`** — argparse front-end. Provides the `pyharness` console
+  script.
+
+### `tui` (REPL — package `pyharness_tui`)
+
+Stdlib-only REPL that subscribes to the event bus and prints. Loop
+behaviour is unaffected; the TUI never threads back into the SDK or
+coding-harness layers.
 
 ## Lifecycle events
 
@@ -151,6 +211,7 @@ non-Continue outcome wins.
 
 ## Line budget
 
-Target: under 1500 lines for `src/pyharness/` excluding tests, examples,
-and generated code. Anything that pushes past the budget should either
+Target: under 1500 lines combined for `packages/pyharness-sdk/src/`
+and `packages/coding-harness/src/`, excluding tests, examples, and
+generated code. Anything that pushes past the budget should either
 move to an extension or be cut.

@@ -9,6 +9,11 @@ The SDK kernel (``pyharness.Agent``) is dumb on purpose: it only knows
 about messages, tools, sessions, events. Everything that makes
 pyharness a coding agent — file conventions, named sub-agents, skills,
 extension discovery, settings hierarchy — lives here.
+
+Domain-specific harnesses (finance, autoresearch, ...) are built as
+**project directories** with ``.pyharness/`` files that this layer
+consumes. No subclassing needed. See
+``docs/guides/build-finance-harness.md`` for the recipe.
 """
 
 from __future__ import annotations
@@ -41,12 +46,10 @@ from .tools.builtin import builtin_registry
 from .workspace import WorkspaceContext
 
 BASE_SYSTEM_PROMPT = (
-    "You are pyharness, an LLM-driven agent running in a headless harness.\n"
-    "You receive a task and complete it by calling the tools available to "
-    "you. When the task is done, reply with a final answer and no tool "
-    "calls.\n\n"
+    "You are an LLM-driven agent running in a headless harness. You receive "
+    "a task and complete it by calling the tools available to you. When the "
+    "task is done, reply with a final answer and no tool calls.\n\n"
     "Operating principles:\n"
-    "- Files are the durable layer. Use the file tools to inspect and edit.\n"
     "- Be concise in user-facing replies. Provide concrete output, not narration.\n"
     "- Prefer one tool call at a time when reasoning is involved.\n"
     "- If a tool returns an error, read the message and adjust before retrying.\n"

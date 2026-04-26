@@ -9,7 +9,7 @@ description = "Agent loop kernel: LLM client, tool ABC, sessions, queues, events
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "pyharness contributors" }]
+authors = [{ name = "pi-py contributors" }]
 dependencies = [
     "litellm>=1.50.0",
     "pydantic>=2.6",
