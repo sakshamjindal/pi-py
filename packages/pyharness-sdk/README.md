@@ -96,10 +96,22 @@ The loop terminates when:
 - No CLI.
 
 This is the kernel. Anything that imposes file conventions or scoping
-rules belongs one layer up. See
+rules belongs one layer up.
+
+**Most domain harnesses don't need to build that layer from scratch
+on the SDK** — they should subclass
+[`coding_harness.CodingAgent`](../coding-harness/) instead, since
+its file conventions (AGENTS.md, named sub-agents, skills,
+extensions discovery, settings hierarchy) are domain-agnostic. The
+guides at
 [`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
 and [`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md)
-for end-to-end examples of one layer up.
+walk through the subclass pattern.
+
+You start from `pyharness-sdk` directly only when your harness
+genuinely **rejects** the file-convention shape — e.g. a remote-
+orchestration harness with no workspace, or a streaming harness
+whose "session" is a network connection rather than a JSONL file.
 
 ---
 

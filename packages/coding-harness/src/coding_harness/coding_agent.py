@@ -9,6 +9,11 @@ The SDK kernel (``pyharness.Agent``) is dumb on purpose: it only knows
 about messages, tools, sessions, events. Everything that makes
 pyharness a coding agent — file conventions, named sub-agents, skills,
 extension discovery, settings hierarchy — lives here.
+
+Domain-specific harnesses (finance, autoresearch, …) **subclass
+CodingAgent** and override a small set of hooks rather than rebuilding
+this layer from scratch on the SDK. See
+``docs/guides/build-finance-harness.md`` for the recipe.
 """
 
 from __future__ import annotations
@@ -40,6 +45,9 @@ from .skills import LoadSkillTool, SkillDefinition, build_skill_index, discover_
 from .tools.builtin import builtin_registry
 from .workspace import WorkspaceContext
 
+# Default system prompt for the coding agent. Subclasses override the
+# ``BASE_SYSTEM_PROMPT`` class attribute on ``CodingAgent`` rather than
+# touching this module-level constant.
 BASE_SYSTEM_PROMPT = (
     "You are pyharness, an LLM-driven agent running in a headless harness.\n"
     "You receive a task and complete it by calling the tools available to "
@@ -71,14 +79,37 @@ class CodingAgentConfig:
 
 
 class CodingAgent:
-    """Assembles a pyharness ``Agent`` with coding-agent defaults."""
+    """Assembles a ``pyharness.Agent`` with coding-agent defaults.
+
+    Designed to be subclassed by domain-specific harnesses. The
+    overridable surface:
+
+    - ``BASE_SYSTEM_PROMPT`` — class attribute. Replace with your
+      domain's prompt.
+    - ``_settings_class`` — class attribute. Set to a ``Settings``
+      subclass that adds typed fields for your domain.
+    - ``_default_tool_registry()`` — returns the registry used when no
+      named sub-agent is selected. Override to swap the built-in
+      coding tools for domain tools.
+    - ``_tool_timeouts()`` — per-tool timeout dict consumed by the SDK
+      loop. Override to declare your tool timeouts.
+    - ``_setup()`` — runs after the registry / skills / extensions are
+      loaded. Override (and call ``super()._setup()``) to install
+      programmatic extensions on top of file-discovered ones.
+
+    All other internals (``_make_session``, ``_build_system_prompt``,
+    ``_build_agent``) are also subclassable but rarely need to be.
+    """
+
+    BASE_SYSTEM_PROMPT: str = BASE_SYSTEM_PROMPT
+    _settings_class: type[Settings] = Settings
 
     def __init__(self, config: CodingAgentConfig):
         self.config = config
         self.workspace_ctx = WorkspaceContext(
             workspace=config.workspace, project_root=config.project_root
         )
-        self.settings = config.settings or Settings.load(
+        self.settings = config.settings or self._settings_class.load(
             workspace=self.workspace_ctx.workspace,
             project_root=self.workspace_ctx.project_root,
             cli_overrides=config.cli_overrides,
@@ -111,6 +142,33 @@ class CodingAgent:
     @property
     def _followup(self):
         return self._agent._followup
+
+    # ------------------------------------------------------------------
+    # Subclass hooks
+    # ------------------------------------------------------------------
+
+    def _default_tool_registry(self) -> ToolRegistry:
+        """Tool registry used when no named sub-agent is selected.
+
+        Subclasses override to swap the coding built-ins for their
+        domain tools (e.g. finance, autoresearch).
+        """
+
+        return builtin_registry()
+
+    def _tool_timeouts(self) -> dict[str, float]:
+        """Per-tool timeouts forwarded to the SDK loop.
+
+        Defaults cover the coding built-ins. Subclasses override (or
+        merge with ``super()._tool_timeouts()``) to declare timeouts
+        for their own tools.
+        """
+
+        return {
+            "bash": float(self.settings.bash_timeout_seconds + 5),
+            "web_fetch": float(self.settings.fetch_timeout_seconds + 5),
+            "web_search": float(self.settings.fetch_timeout_seconds + 5),
+        }
 
     # ------------------------------------------------------------------
     # Setup
@@ -161,10 +219,10 @@ class CodingAgent:
                 agent_name=self.agent_def.name,
             )
         else:
-            self.tool_registry = builtin_registry()
+            self.tool_registry = self._default_tool_registry()
 
     def _build_system_prompt(self) -> str:
-        parts = [BASE_SYSTEM_PROMPT.strip()]
+        parts = [self.BASE_SYSTEM_PROMPT.strip()]
         if not self.config.bare:
             agents_md = self.workspace_ctx.render_agents_md()
             if agents_md:
@@ -189,11 +247,7 @@ class CodingAgent:
             compaction_threshold_pct=self.settings.compaction_threshold_pct,
             tool_output_max_bytes=self.settings.tool_output_max_bytes,
             tool_output_max_lines=self.settings.tool_output_max_lines,
-            tool_timeouts={
-                "bash": float(self.settings.bash_timeout_seconds + 5),
-                "web_fetch": float(self.settings.fetch_timeout_seconds + 5),
-                "web_search": float(self.settings.fetch_timeout_seconds + 5),
-            },
+            tool_timeouts=self._tool_timeouts(),
             max_tokens=self.settings.model_dump().get("max_tokens"),
             agent_name=self.agent_def.name if self.agent_def else None,
             settings_snapshot=self.settings.model_dump(),

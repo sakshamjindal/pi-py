@@ -1,31 +1,56 @@
-# Building a finance harness on pyharness-sdk
+# Building a finance harness on `coding-harness`
 
 This guide walks through building **`finance-harness`** — a
 domain-specific harness for trading, portfolio analysis, or research
-desks. It depends only on `pyharness-sdk` (the kernel); it is *not*
-built on top of `coding-harness` because finance work has different
-file conventions, different tools, different guard rails, and a
-different mental model from a coding agent.
+desks — by **subclassing `coding_harness.CodingAgent`** rather than
+re-implementing the assembly layer on top of `pyharness-sdk`.
 
-The shape mirrors what `coding-harness` does for software
-engineering. After working through this, the same recipe applies to
-autoresearch, quant research, ops harnesses, and so on.
+`coding-harness` already provides every piece of scaffolding a
+domain harness needs that isn't actually domain-specific: settings
+hierarchy, AGENTS.md walking, project root discovery, named
+sub-agents, on-demand skills, extension discovery from
+`<scope>/.pyharness/extensions/`, and the assembly machinery that
+ties them to the SDK loop. Reuse it.
+
+You only write the bits that are *actually* domain-specific:
+
+| Coding agent has | Finance harness adds |
+| --- | --- |
+| AGENTS.md (project conventions) | (reused — finance project conventions go in the same `AGENTS.md`) |
+| Named sub-agents (research-analyst.md) | Named sub-agents (`market-maker.md`, `pm-rebalance.md`) at `<scope>/.pyharness/agents/` |
+| Skills (market-data, etc.) | Skills (`options-greeks`, `risk-checks`) at `<scope>/.pyharness/skills/` |
+| Built-in tools (read/write/edit/bash) | Domain tools (`get_quote`, `get_positions`, `place_order`) — replace the default registry |
+| `~/.pyharness/settings.json` | (reused — finance fields go in the same file via a `Settings` subclass) |
+| `pyharness "fix the failing tests"` | `finance-harness "rebalance to target weights"` — your own thin CLI |
+
+Same loop, same session log format, same extension model. Only the
+*domain tools, the system prompt, and the settings extras* are new
+code.
 
 ---
 
-## What you're building
+## What `coding-harness` already gives you
 
-| Coding agent has | Finance harness has |
-| --- | --- |
-| AGENTS.md (project conventions) | `STRATEGY.md` (firm / desk policies) |
-| Named sub-agents (research-analyst.md) | Named sub-agents (`market-maker.md`, `pm-rebalance.md`) |
-| Skills (market-data, etc.) | Skills (`options-greeks`, `risk-checks`) |
-| Built-in tools (read/write/edit/bash) | Domain tools (`get_quote`, `get_positions`, `place_order`) |
-| `~/.pyharness/` | `~/.finance-harness/` |
-| `pyharness "fix the failing tests"` | `finance-harness "rebalance to target weights"` |
+Before writing any finance code, recognize what's free:
 
-Same loop, same session log format, same extension model. Only the
-*conventions* and *tools* are domain-specific.
+- **`WorkspaceContext`** — walks `~/.pyharness/`, `<project>/.pyharness/`,
+  `<workspace>/.pyharness/` in general-first order. Discovers
+  `agents/`, `skills/`, `tools/`, `extensions/` subdirs.
+- **`Settings`** — JSON config with `extra="allow"`; loaded in
+  personal → project → CLI override order.
+- **`discover_agents`, `load_agent_definition`, `resolve_tool_list`** —
+  named sub-agents from frontmatter Markdown.
+- **`discover_skills`, `LoadSkillTool`, `build_skill_index`** —
+  on-demand skill bundles.
+- **`load_extensions`** — file-discovered extension modules with
+  `register(api)` entry points.
+- **`load_tools_from_module`** — dynamic Python tool module loader
+  for `<scope>/.pyharness/tools/`.
+- **`CodingAgent.__init__`** — assembles workspace + settings +
+  session + registry + skills + system prompt + extensions + LLM +
+  Compactor → `pyharness.Agent`.
+
+Subclass it. Don't rebuild it.
 
 ---
 
@@ -37,13 +62,11 @@ finance-harness/
   src/finance_harness/
     __init__.py
     cli.py            # `finance-harness` entry point
-    runner.py         # FinanceAgent assembly class
-    config.py         # Settings: broker creds, risk limits, default model
-    workspace.py      # Strategy/policy file walking
-    strategies.py     # Load STRATEGY.md and named sub-agents
-    risk.py           # Pre-trade risk-check extension
+    runner.py         # FinanceHarness(CodingAgent) subclass
+    config.py         # FinanceSettings(Settings) — typed broker / risk fields
+    risk.py           # before_tool_call extension installed in _setup
     tools/
-      __init__.py
+      __init__.py     # finance_registry() — the override target
       market_data.py  # get_quote, get_history, get_fundamentals
       portfolio.py    # get_positions, get_pnl
       orders.py       # place_order, cancel_order
@@ -58,31 +81,25 @@ name = "finance-harness"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-  "pyharness",         # the SDK kernel
-  "pydantic>=2.6",
-  # broker SDK, market-data SDK, etc.
+  "pyharness",
+  "coding-harness",   # the base we're subclassing
 ]
 
 [project.scripts]
 finance-harness = "finance_harness.cli:main"
 ```
 
-Note: depends on `pyharness` (not `coding-harness`). You're building a
-peer of coding-harness, not an extension of it.
+Note: depends on `coding-harness`, not just `pyharness`. You inherit
+the whole assembly layer.
 
 ---
 
 ## Step 2 — Domain tools
 
-Tools are Pydantic-backed `pyharness.Tool` subclasses. The args
-schema doubles as the LLM-facing JSON schema and as runtime
-validation.
+Same `pyharness.Tool` ABC that the coding tools use:
 
 ```python
 # src/finance_harness/tools/market_data.py
-from datetime import date
-from typing import Literal
-
 from pydantic import BaseModel, Field
 from pyharness import Tool, ToolContext, ToolError
 
@@ -97,15 +114,15 @@ class GetQuoteTool(Tool):
     args_schema = _GetQuoteArgs
 
     async def execute(self, args, ctx: ToolContext):
-        # Hit your market-data provider here.
-        # On failure, raise ToolError — the loop reports `ok=False`
-        # back to the LLM so it can retry or branch.
         try:
             quote = await self._provider.quote(args.ticker)
         except Exception as exc:
             raise ToolError(f"quote unavailable: {exc}") from exc
-        return quote.model_dump()  # any Pydantic / dict / str works
+        return quote.model_dump()
 
+
+# src/finance_harness/tools/orders.py
+from typing import Literal
 
 class _PlaceOrderArgs(BaseModel):
     ticker: str
@@ -119,27 +136,29 @@ class _PlaceOrderArgs(BaseModel):
 
 class PlaceOrderTool(Tool):
     name = "place_order"
-    description = "Submit an order to the broker. Validates against risk limits."
+    description = "Submit an order. Validates against risk limits."
     args_schema = _PlaceOrderArgs
 
     async def execute(self, args, ctx: ToolContext):
-        # ... call the broker API ...
+        # ... call broker API ...
         return {"order_id": ..., "status": "submitted"}
 ```
 
-Tools are discoverable as a list:
+Bundle them:
 
 ```python
 # src/finance_harness/tools/__init__.py
+from pyharness import ToolRegistry
 from .market_data import GetQuoteTool
 from .orders import PlaceOrderTool
 from .portfolio import GetPositionsTool
 
+
 def all_finance_tools():
     return [GetQuoteTool(), GetPositionsTool(), PlaceOrderTool()]
 
-def finance_registry():
-    from pyharness import ToolRegistry
+
+def finance_registry() -> ToolRegistry:
     reg = ToolRegistry()
     for t in all_finance_tools():
         reg.register(t)
@@ -148,53 +167,41 @@ def finance_registry():
 
 ---
 
-## Step 3 — Settings + workspace
-
-Mirror coding-harness's settings hierarchy. Personal at
-`~/.finance-harness/settings.json`; project at
-`<project>/.finance-harness/settings.json`; CLI overrides win last.
+## Step 3 — Settings subclass for typed extras
 
 ```python
 # src/finance_harness/config.py
-from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field
+from coding_harness import Settings
 
-class Settings(BaseModel):
-    model_config = ConfigDict(extra="allow")
 
-    default_model: str = "claude-opus-4-7"
-    summarization_model: str = "claude-haiku-4-5"
-    max_turns: int = 50
-
-    # finance-specific
+class FinanceSettings(Settings):
+    # adds typed fields on top of coding-harness defaults
     broker: str = "alpaca-paper"
     max_position_usd: float = 10_000.0
     max_orders_per_run: int = 5
-    enable_live_orders: bool = False    # default to paper
-
-    @classmethod
-    def load(cls, *, workspace: Path, cli_overrides: dict | None = None):
-        # walk personal + project settings.json, merge, validate.
-        ...
+    enable_live_orders: bool = False
+    quote_timeout_seconds: int = 10
+    place_order_timeout_seconds: int = 30
 ```
 
-`workspace.py` is the same pattern: discover the project root by
-walking up looking for `.finance-harness/`, then surface the scope
-dirs in general-first order.
+Because `Settings` already has `model_config = ConfigDict(extra="allow")`,
+finance fields can also live in `~/.pyharness/settings.json`
+unannounced — but typed inheritance lets your code use
+`self.settings.max_position_usd` with autocomplete and validation.
 
 ---
 
 ## Step 4 — Risk-check as an extension
 
-Cross-cutting safety lives in extensions, not tools. Subscribe to
-`before_tool_call` and deny dangerous orders:
+Cross-cutting safety belongs in extensions, not tools. Subscribe to
+`before_tool_call`:
 
 ```python
 # src/finance_harness/risk.py
-from pyharness import EventBus, ExtensionAPI, HookOutcome
+from pyharness import ExtensionAPI, HookOutcome
 
 
-def install(api: ExtensionAPI, settings) -> None:
+def install(api: ExtensionAPI) -> None:
     api.on("before_tool_call", _gate)
 
 
@@ -203,14 +210,12 @@ async def _gate(event, ctx):
         return HookOutcome.cont()
 
     args = event.payload.get("arguments") or {}
-    qty = args.get("qty", 0)
-    notional = qty * _last_known_price(args.get("ticker"))
+    settings = ctx.settings  # FinanceSettings via the assembly layer
+    notional = args.get("qty", 0) * _last_known_price(args.get("ticker"))
 
-    settings = ctx.settings  # passed through from the assembly layer
     if notional > settings.max_position_usd:
         return HookOutcome.deny(
-            f"order notional ${notional:.0f} exceeds limit "
-            f"${settings.max_position_usd:.0f}"
+            f"order notional ${notional:.0f} exceeds limit ${settings.max_position_usd:.0f}"
         )
     if not settings.enable_live_orders:
         return HookOutcome.replace({
@@ -221,171 +226,98 @@ async def _gate(event, ctx):
     return HookOutcome.cont()
 ```
 
-This hook *intercepts* the tool call before it runs:
-- `Deny` → tool result is the deny reason; LLM sees it and decides
-  what to do.
-- `Replace` → returns the synthetic value as the tool result without
-  the real tool ever running. Perfect for paper-trading mode.
+`Deny` → tool result is the deny reason; LLM sees it and adjusts.
+`Replace` → returns the synthetic value as the tool result without
+the real tool ever running. Perfect for paper-trading.
 
-User extensions in `<scope>/.finance-harness/extensions/` can
-subscribe to the same events for audit, P&L tracking, kill switches
-keyed off env vars, etc. — copy `coding-harness`'s
-`extensions_loader.py` verbatim.
+User extensions in `<scope>/.pyharness/extensions/<name>.py` are
+loaded automatically by `coding-harness` — no extra wiring. This
+file just provides the always-on risk gate that ships with
+finance-harness itself.
 
 ---
 
-## Step 5 — System prompt assembly
-
-The system prompt is just text. Compose it from your domain
-conventions:
-
-```python
-BASE_SYSTEM_PROMPT = (
-    "You are an LLM-driven trading agent operating under firm risk "
-    "limits and broker mandates. Use the tools to inspect market "
-    "state, retrieve positions, and place orders. Every order is "
-    "subject to pre-trade risk checks and may be denied or "
-    "simulated. When a check denies an order, read the reason and "
-    "adjust before retrying.\n\n"
-    "Operating principles:\n"
-    "- Never place an order without first checking current quote "
-    "  and current position.\n"
-    "- Prefer limit orders over market orders unless explicitly "
-    "  instructed otherwise.\n"
-    "- If risk denies an order, do not retry the same order; "
-    "  surface the issue and ask for guidance.\n"
-)
-
-
-def build_system_prompt(workspace_ctx, agent_def, skills) -> str:
-    parts = [BASE_SYSTEM_PROMPT.strip()]
-
-    # firm/desk policy from STRATEGY.md
-    strategy = workspace_ctx.render_strategy_md()  # equiv. of AGENTS.md
-    if strategy:
-        parts.append(strategy)
-
-    # named sub-agent body (optional)
-    if agent_def is not None and agent_def.body.strip():
-        parts.append(agent_def.body.strip())
-
-    # available skills
-    skill_index = build_skill_index(skills)
-    if skill_index:
-        parts.append(skill_index)
-
-    return "\n\n".join(parts)
-```
-
----
-
-## Step 6 — Assembly layer
-
-This is the glue. Mirror `coding_harness.coding_agent.CodingAgent`.
+## Step 5 — The harness class: ~25 lines
 
 ```python
 # src/finance_harness/runner.py
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
-import uuid
+from pyharness import ExtensionAPI, ToolRegistry
+from coding_harness import CodingAgent, CodingAgentConfig
 
-from pyharness import (
-    Agent, AgentHandle, AgentOptions, Compactor, EventBus,
-    ExtensionAPI, LLMClient, Message, RunResult, Session, ToolRegistry,
-)
-
-from .config import Settings
+from .config import FinanceSettings
 from .risk import install as install_risk
-from .strategies import discover_agents, load_agent_definition
 from .tools import finance_registry
-from .workspace import WorkspaceContext
-
-BASE_SYSTEM_PROMPT = "..."  # see Step 5
 
 
-@dataclass
-class FinanceAgentConfig:
-    workspace: Path
-    model: str | None = None
-    agent_name: str | None = None
-    settings: Settings | None = None
-    extra_messages: list[Message] = field(default_factory=list)
+FINANCE_PROMPT = """\
+You are an LLM-driven trading agent operating under firm risk
+limits and broker mandates. Use the tools to inspect market state,
+retrieve positions, and place orders. Every order is subject to
+pre-trade risk checks and may be denied or simulated. When a check
+denies an order, read the reason and adjust before retrying.
+
+Operating principles:
+- Never place an order without first checking the current quote and
+  current position.
+- Prefer limit orders over market orders unless explicitly told
+  otherwise.
+- If risk denies an order, surface the issue rather than retrying
+  the same order.
+"""
 
 
-class FinanceAgent:
-    def __init__(self, config: FinanceAgentConfig):
-        self.config = config
-        self.workspace_ctx = WorkspaceContext(workspace=config.workspace)
-        self.settings = config.settings or Settings.load(
-            workspace=self.workspace_ctx.workspace
-        )
-        self.model = config.model or self.settings.default_model
-        self.event_bus = EventBus()
-        self.session = Session.new(self.workspace_ctx.workspace)
+class FinanceHarness(CodingAgent):
+    BASE_SYSTEM_PROMPT = FINANCE_PROMPT
+    _settings_class = FinanceSettings
 
-        # tool registry: domain tools + any sub-agent restrictions
-        self.tool_registry: ToolRegistry = self._build_tool_registry()
+    def _default_tool_registry(self) -> ToolRegistry:
+        return finance_registry()
 
-        # always-on cross-cutting risk checks
+    def _tool_timeouts(self) -> dict[str, float]:
+        return {
+            "get_quote":   float(self.settings.quote_timeout_seconds),
+            "place_order": float(self.settings.place_order_timeout_seconds),
+        }
+
+    def _setup(self) -> None:
+        super()._setup()
+        # Install the always-on risk gate after file-discovered
+        # extensions have run, so a project extension can't disable
+        # it accidentally.
         api = ExtensionAPI(
             bus=self.event_bus,
             registry=self.tool_registry,
             settings=self.settings,
         )
-        install_risk(api, self.settings)
-
-        # user extensions discovered from .finance-harness/extensions/
-        # ... call your loader here ...
-
-        self.system_prompt = self._build_system_prompt()
-
-        self.llm = LLMClient()
-        self.compactor = Compactor(
-            self.llm,
-            summarization_model=self.settings.summarization_model,
-        )
-
-        options = AgentOptions(
-            model=self.model,
-            max_turns=self.settings.max_turns,
-            tool_timeouts={"place_order": 30.0, "get_quote": 10.0},
-            settings_snapshot=self.settings.model_dump(),
-        )
-        self._agent = Agent(
-            options,
-            system_prompt=self.system_prompt,
-            tool_registry=self.tool_registry,
-            session=self.session,
-            event_bus=self.event_bus,
-            workspace=self.workspace_ctx.workspace,
-            llm=self.llm,
-            compactor=self.compactor,
-            run_id=uuid.uuid4().hex,
-            extra_messages=self.config.extra_messages,
-        )
-
-    async def run(self, prompt: str) -> RunResult:
-        return await self._agent.run(prompt)
-
-    def start(self, prompt: str) -> AgentHandle:
-        return self._agent.start(prompt)
-
-    # ... _build_tool_registry, _build_system_prompt as in coding_harness
+        install_risk(api)
 ```
+
+That's the entire harness class. You inherited:
+
+- Settings loading (now with `FinanceSettings` instead of `Settings`)
+- Workspace + project root discovery
+- Named sub-agents (`<scope>/.pyharness/agents/<name>.md`)
+- Skills (`<scope>/.pyharness/skills/<name>/`)
+- File-discovered extensions (`<scope>/.pyharness/extensions/`)
+- Project tools (`<scope>/.pyharness/tools/`)
+- Session creation / resume / fork
+- Compaction
+- The full `pyharness.Agent` loop
 
 ---
 
-## Step 7 — CLI
-
-Trivial argparse front-end. Same shape as `coding_harness.cli`:
+## Step 6 — Thin CLI
 
 ```python
 # src/finance_harness/cli.py
-import argparse, asyncio, sys
+import argparse
+import asyncio
+import sys
 from pathlib import Path
 
-from .runner import FinanceAgent, FinanceAgentConfig
+from coding_harness import CodingAgentConfig
+from .config import FinanceSettings
+from .runner import FinanceHarness
 
 
 def main(argv=None) -> int:
@@ -404,41 +336,62 @@ def main(argv=None) -> int:
         return 2
 
     workspace = (args.workspace or Path.cwd()).resolve()
-    cfg = FinanceAgentConfig(
-        workspace=workspace, model=args.model, agent_name=args.agent
-    )
+    cli_overrides: dict = {}
     if args.enable_live:
-        cfg.settings = (cfg.settings or load_settings()).model_copy(
-            update={"enable_live_orders": True}
-        )
+        cli_overrides["enable_live_orders"] = True
 
-    result = asyncio.run(FinanceAgent(cfg).run(prompt))
+    cfg = CodingAgentConfig(
+        workspace=workspace,
+        model=args.model,
+        agent_name=args.agent,
+        cli_overrides=cli_overrides,
+    )
+    result = asyncio.run(FinanceHarness(cfg).run(prompt))
     sys.stdout.write(result.final_output.rstrip() + "\n")
     return 0 if result.completed else 1
 ```
 
+That's it. The full finance-harness implementation is roughly:
+
+| File | Lines |
+| --- | --- |
+| `runner.py` | ~30 |
+| `config.py` | ~10 |
+| `risk.py` | ~25 |
+| `cli.py` | ~30 |
+| `tools/*.py` | however many tools you have |
+
+Days of work, not weeks. And every file convention, every settings
+override, every extension hook works the same as in coding-harness
+because it *is* coding-harness.
+
 ---
 
-## What you get for free from `pyharness-sdk`
+## Why subclass instead of starting from `pyharness-sdk`?
 
-Without writing any of this yourself:
+You'd write — and have to keep correct — all of the following
+yourself if you started from the SDK:
 
-- The full agent loop (queue draining, compaction, tool dispatch,
-  steering, abort, max-turns).
-- Pydantic-validated tool args with errors looped back to the LLM
-  rather than crashing the run.
-- Append-only JSONL session log, with resume + fork by sequence
-  number. Every order ever placed is on disk.
-- Anthropic prompt caching applied automatically on Claude models
-  (cuts cost on long-running desks).
-- Live steering via `agent.start()` + `handle.steer(...)` — perfect
-  for "wait, pause that, switch to risk-off mode".
-- A typed event bus that any monitoring system, audit pipeline, or
-  kill-switch can hook into.
+- A workspace context that walks scope directories.
+- A settings JSON loader with the same merge order.
+- An AGENTS.md walker.
+- A named-agent frontmatter parser with tool resolution.
+- A skill discovery + on-demand loader (with the `load_skill` tool).
+- A file-discovery extension loader.
+- A project-tools dynamic loader.
+- An assembly layer that ties all of this together and instantiates
+  `pyharness.Agent` correctly (including the `tool_timeouts`,
+  `settings_snapshot`, `agent_name` plumbing).
 
-What you write: tools, file conventions, the system prompt, the
-risk extension, the assembly class, the CLI. Days of work, not
-weeks.
+That's most of `coding-harness`. There's no value in re-deriving it
+for a finance vertical — the conventions are the same.
+
+You'd start from the SDK directly only if your harness genuinely
+**rejects** the file conventions: e.g. a remote-orchestration harness
+that doesn't have a workspace at all, or a streaming harness whose
+"session" is a network connection rather than a JSONL file. For
+domain harnesses that look like "use a different prompt + different
+tools + different guard rails", subclass.
 
 ---
 
@@ -446,7 +399,7 @@ weeks.
 
 - [`build-autoresearch-harness.md`](build-autoresearch-harness.md)
   — same recipe, different domain.
-- [`packages/pyharness-sdk/README.md`](../../packages/pyharness-sdk/README.md)
-  — kernel API surface and the loop diagram.
 - [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
-  — the worked example to read alongside this guide.
+  — the full assembly walkthrough you're inheriting from.
+- [`packages/pyharness-sdk/README.md`](../../packages/pyharness-sdk/README.md)
+  — kernel API surface, useful when you write tools and extensions.

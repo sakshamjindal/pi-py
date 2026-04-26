@@ -1,33 +1,39 @@
-# Building an autoresearch harness on pyharness-sdk
+# Building an autoresearch harness on `coding-harness`
 
 This guide walks through building **`autoresearch-harness`** — a
-domain-specific harness that runs long-horizon research tasks
-autonomously: read sources, take notes, run experiments, write
-synthesis reports. It depends only on `pyharness-sdk` (the kernel).
+domain-specific harness for long-horizon research tasks: read
+sources, take notes, run experiments, write synthesis reports — by
+**subclassing `coding_harness.CodingAgent`**.
 
-The shape mirrors what `coding-harness` does for software
-engineering and what
-[`build-finance-harness.md`](build-finance-harness.md) sketches for
-trading. Read those alongside this for the cross-domain pattern.
+Read [`build-finance-harness.md`](build-finance-harness.md) first;
+this guide assumes you've seen the subclass pattern and only
+elaborates the autoresearch-specific concerns. The defining trait of
+autoresearch is that runs are **long** (often hundreds of turns),
+**iterative** (notes accumulate; the agent revisits its own
+outputs), and **structured** (a plan file is the shared truth
+between turns). The features that matter most: context compaction,
+session resume, the steering queue, and disk-as-truth.
 
 ---
 
-## What you're building
+## What's reused from `coding-harness`
 
-| Coding agent has | Autoresearch harness has |
+Almost everything. Look at the table:
+
+| Coding agent has | Autoresearch reuses / adds |
 | --- | --- |
-| AGENTS.md (project conventions) | `RESEARCH_PLAN.md` (current plan + open questions) |
-| Named sub-agents (research-analyst.md) | Named sub-agents (`literature-review.md`, `synthesise.md`, `experiment-runner.md`) |
-| Skills (market-data) | Skills (`pubmed-search`, `arxiv-fetch`, `notebook-execute`) |
-| Built-in tools (read/write/edit/bash) | Domain tools (`web_search`, `web_fetch`, `pdf_read`, `notebook_run`, `note_append`, `cite_lookup`) |
-| `~/.pyharness/` | `~/.autoresearch/` |
-| `pyharness "fix the failing tests"` | `autoresearch "investigate prior work on X and write a 2-page synthesis"` |
+| AGENTS.md (project conventions) | reused — research project conventions go in `AGENTS.md` |
+| Named sub-agents | adds `literature-review.md`, `synthesise.md`, `experiment-runner.md` at `<scope>/.pyharness/agents/` |
+| Skills (market-data) | adds `pubmed-search`, `arxiv-fetch`, `notebook-execute` at `<scope>/.pyharness/skills/` |
+| Built-in tools (read/write/edit/grep/glob/web_search/web_fetch) | **mostly reuses these as-is** plus adds `pdf_read`, `note_append`, `note_list`, `cite_lookup`, `notebook_run` |
+| Settings hierarchy | reused — `AutoresearchSettings(Settings)` adds typed extras |
+| Extension discovery | reused — citation-audit and time-budget extensions ship with autoresearch and are also user-extensible |
+| `pyharness "task"` CLI | replaced by your own `autoresearch "task"` thin wrapper |
 
-The defining trait of autoresearch is that runs are **long** (often
-hundreds of turns), **iterative** (notes accumulate; the agent
-revisits its own outputs), and **structured** (a plan file is the
-shared truth between turns). The kernel features that matter most:
-context compaction, session resume, the steering queue, and disk-as-truth.
+The big difference from finance: **autoresearch keeps several of the
+coding built-ins** because reading files, writing files, grepping
+notes, and fetching web pages are exactly what a researcher does.
+You augment the registry rather than replace it.
 
 ---
 
@@ -39,20 +45,17 @@ autoresearch-harness/
   src/autoresearch_harness/
     __init__.py
     cli.py            # `autoresearch` entry point
-    runner.py         # ResearchAgent assembly class
-    config.py         # Settings: model, search providers, citation style, time budget
-    workspace.py      # Walks RESEARCH_PLAN.md, plan_root discovery
-    plan.py           # Plan-file parser + agent-side helpers
+    runner.py         # AutoresearchHarness(CodingAgent) subclass
+    config.py         # AutoresearchSettings — model, citation style, time budget
+    extensions/
+      time_budget.py  # cap total wall-time per run
+      cite_audit.py   # block synthesis steps if claims lack citations
     tools/
-      __init__.py
-      search.py       # web_search wrapping the configured provider
-      fetch.py        # web_fetch + PDF / HTML extraction
+      __init__.py     # research_registry() — coding builtins + research tools
+      pdf.py          # pdf_read
       notes.py        # note_append, note_list — durable on-disk notes
       cite.py         # cite_lookup, bibtex_emit
       notebook.py     # notebook_run for code-bearing skills
-    extensions/
-      time_budget.py  # cap total run wall-time + turns from settings
-      cite_audit.py   # block synthesis steps if claims lack citations
   tests/
 ```
 
@@ -64,10 +67,9 @@ name = "autoresearch-harness"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-  "pyharness",          # the SDK kernel
-  "pydantic>=2.6",
-  "httpx>=0.27",        # for fetch
-  "pypdf>=4.0",         # for pdf_read
+  "pyharness",
+  "coding-harness",
+  "pypdf>=4.0",
   # search-provider SDK, jupyter client, etc.
 ]
 
@@ -79,20 +81,17 @@ autoresearch = "autoresearch_harness.cli:main"
 
 ## Step 2 — Notes and the plan file: disk-as-truth
 
-The single most important design choice for an autoresearch agent is
-**make the notes/plan files the agent's working memory, not its
-context window**. Long runs blow up context windows; compaction
-helps but lossy summaries hurt research quality. The fix:
-
-- A `notes/` directory the agent appends to via a `note_append` tool.
-- A `RESEARCH_PLAN.md` file the agent rewrites as the plan evolves.
-- Both injected into the system prompt at every turn (or read on
-  demand via `read`).
+The single most important design choice for an autoresearch agent
+is: **make notes/plan files the agent's working memory, not its
+context window.** Long runs blow up context; compaction helps but
+lossy summaries hurt research quality. The fix is two new tools and
+a system-prompt directive.
 
 ```python
 # src/autoresearch_harness/tools/notes.py
+import re
 from datetime import datetime
-from pathlib import Path
+
 from pydantic import BaseModel, Field
 from pyharness import Tool, ToolContext, safe_path
 
@@ -114,7 +113,8 @@ class NoteAppendTool(Tool):
     async def execute(self, args, ctx: ToolContext):
         notes_dir = safe_path(ctx.workspace, "notes")
         notes_dir.mkdir(parents=True, exist_ok=True)
-        path = notes_dir / f"{_slugify(args.topic)}.md"
+        slug = re.sub(r"[^a-z0-9-]+", "-", args.topic.lower()).strip("-")
+        path = notes_dir / f"{slug}.md"
         ts = datetime.utcnow().isoformat(timespec="seconds")
         with path.open("a", encoding="utf-8") as fh:
             fh.write(f"\n## {ts}\n\n{args.content}\n")
@@ -135,21 +135,45 @@ class NoteListTool(Tool):
         if not notes_dir.is_dir():
             return []
         return sorted(
-            ({"topic": p.stem, "mtime": p.stat().st_mtime} for p in notes_dir.glob("*.md")),
+            ({"topic": p.stem, "mtime": p.stat().st_mtime}
+             for p in notes_dir.glob("*.md")),
             key=lambda r: r["mtime"], reverse=True,
         )
 ```
 
-The system prompt should mention these tools explicitly: *"Use
-`note_append` aggressively. Anything you'd want available three
-turns from now must be on disk."*
+In your registry, **augment** the coding built-ins rather than
+replacing them — `read`/`write`/`grep`/`glob`/`web_search`/`web_fetch`
+are exactly what you need to interrogate notes and read sources:
+
+```python
+# src/autoresearch_harness/tools/__init__.py
+from coding_harness import builtin_registry
+
+from .notes import NoteAppendTool, NoteListTool
+from .pdf import PdfReadTool
+from .cite import CiteLookupTool
+from .notebook import NotebookRunTool
+
+
+def research_registry():
+    reg = builtin_registry()  # read/write/edit/bash/grep/glob/web_*
+    reg.register(NoteAppendTool())
+    reg.register(NoteListTool())
+    reg.register(PdfReadTool())
+    reg.register(CiteLookupTool())
+    reg.register(NotebookRunTool())
+    return reg
+```
+
+(For an autoresearch desk that should *not* execute shell, you'd
+unregister `bash` here — that's a one-liner.)
 
 ---
 
-## Step 3 — Citation discipline as an extension
+## Step 3 — Citation audit + time budget extensions
 
-For research output to be trustworthy, claims need citations. Make
-that a hard rule via an extension on `before_tool_call`:
+Two cross-cutting concerns ship with the harness and are installed
+in `_setup`:
 
 ```python
 # src/autoresearch_harness/extensions/cite_audit.py
@@ -159,18 +183,15 @@ from pyharness import ExtensionAPI, HookOutcome
 _CITE_RE = re.compile(r"\[@[a-z0-9_-]+\]", re.I)
 
 
-def install(api: ExtensionAPI, settings) -> None:
+def install(api: ExtensionAPI) -> None:
     api.on("before_tool_call", _gate)
 
 
 async def _gate(event, ctx):
     name = event.payload.get("tool_name")
     args = event.payload.get("arguments") or {}
-
-    # Only audit calls that produce final-ish output.
     if name == "write" and args.get("path", "").endswith(("synthesis.md", "report.md")):
         content = args.get("content", "")
-        # Crude check: at least one [@cite-key] reference per heading.
         headings = [h for h in content.splitlines() if h.startswith("#")]
         cites = _CITE_RE.findall(content)
         if headings and len(cites) < len(headings):
@@ -181,32 +202,20 @@ async def _gate(event, ctx):
     return HookOutcome.cont()
 ```
 
-The denial reason flows back to the LLM as a tool result; the agent
-sees what's wrong and corrects rather than the run crashing.
-
----
-
-## Step 4 — Time budget extension
-
-Long runs need a hard ceiling. Cap total wall-time, not just
-`max_turns`:
-
 ```python
 # src/autoresearch_harness/extensions/time_budget.py
 import time
 from pyharness import ExtensionAPI, HookOutcome
 
 
-def install(api: ExtensionAPI, settings) -> None:
-    started = time.monotonic()
-    deadline = started + settings.max_wall_seconds
+def install(api: ExtensionAPI, max_wall_seconds: int) -> None:
+    deadline = time.monotonic() + max_wall_seconds
 
     async def _gate(event, ctx):
         if time.monotonic() > deadline:
             return HookOutcome.deny(
-                f"wall-time budget exhausted "
-                f"({settings.max_wall_seconds}s); end the run with a "
-                f"final summary based on what's already on disk."
+                f"wall-time budget exhausted ({max_wall_seconds}s); "
+                "end the run with a final summary based on disk notes."
             )
         return HookOutcome.cont()
 
@@ -214,18 +223,21 @@ def install(api: ExtensionAPI, settings) -> None:
     api.on("before_tool_call", _gate)
 ```
 
-The agent sees `denied: wall-time budget exhausted` and writes a
-synthesis from disk-truth instead of starting new investigations.
-
 ---
 
-## Step 5 — The system prompt that makes this work
-
-The kernel doesn't know about research conventions. The prompt is
-where you make them concrete:
+## Step 4 — The harness class: ~30 lines
 
 ```python
-BASE_SYSTEM_PROMPT = """\
+# src/autoresearch_harness/runner.py
+from pyharness import ExtensionAPI, ToolRegistry
+from coding_harness import CodingAgent
+
+from .config import AutoresearchSettings
+from .extensions import cite_audit, time_budget
+from .tools import research_registry
+
+
+RESEARCH_PROMPT = """\
 You are a long-horizon research agent. Your job is to investigate a
 topic deeply, take rigorous notes, and produce a defensible
 synthesis.
@@ -233,9 +245,8 @@ synthesis.
 Disk is your memory. Your context window is working memory only.
 
 - Use `note_append` after every meaningful finding. Tag it.
-- Update `RESEARCH_PLAN.md` whenever the plan changes — never let
-  it go stale.
-- Before starting any new line of inquiry, call `note_list` and
+- Update `RESEARCH_PLAN.md` whenever the plan changes.
+- Before starting a new line of inquiry, call `note_list` and
   `read RESEARCH_PLAN.md` to remind yourself what's known.
 - Cite everything in synthesis output using `[@cite-key]` shorthand.
 - When you hit a wall-time or budget limit, summarise from notes
@@ -243,123 +254,157 @@ Disk is your memory. Your context window is working memory only.
 
 Tool usage:
 - Prefer `web_search` for breadth, `web_fetch` for depth.
-- For PDFs use `pdf_read`. For code-bearing analysis, `notebook_run`
-  in the configured kernel.
+- For PDFs use `pdf_read`. For code-bearing analysis, `notebook_run`.
 """
+
+
+class AutoresearchHarness(CodingAgent):
+    BASE_SYSTEM_PROMPT = RESEARCH_PROMPT
+    _settings_class = AutoresearchSettings
+
+    def _default_tool_registry(self) -> ToolRegistry:
+        return research_registry()
+
+    def _tool_timeouts(self) -> dict[str, float]:
+        # Inherit the coding defaults (bash/web_*) and add research-specific.
+        tt = super()._tool_timeouts()
+        tt.update({
+            "pdf_read":     30.0,
+            "notebook_run": 120.0,
+        })
+        return tt
+
+    def _setup(self) -> None:
+        super()._setup()
+        api = ExtensionAPI(
+            bus=self.event_bus,
+            registry=self.tool_registry,
+            settings=self.settings,
+        )
+        cite_audit.install(api)
+        time_budget.install(api, max_wall_seconds=self.settings.max_wall_seconds)
 ```
 
-Inject the current `RESEARCH_PLAN.md` content into the prompt at
-each turn boundary via a `before_llm_call` extension if you want
-the plan to always be top-of-mind, OR rely on the agent to `read`
-it when needed (cheaper, requires more discipline).
+`AutoresearchSettings` is a 5-line subclass of `Settings` adding
+`max_wall_seconds`, `citation_style`, `compaction_threshold_pct=0.6`
+(more aggressive than the coding default of 0.8), etc.
 
 ---
 
-## Step 6 — Assembly + CLI + resume
+## Step 5 — CLI: resume by default
 
-The assembly is the same shape as
-[`build-finance-harness.md`](build-finance-harness.md) Step 6 — read
-settings, walk the workspace, build the registry, install
-extensions, instantiate `pyharness.Agent`. Two specifics for
-autoresearch:
-
-**Resume is a feature, not a corner case.** Long runs get
-interrupted. Make the CLI default to *continuing* the most recent
-session in the cwd, with `--new` to opt out:
+Long runs get interrupted. Make the CLI default to **continuing**
+the most recent session in cwd, with `--new` to opt out:
 
 ```python
+# src/autoresearch_harness/cli.py
+import argparse, asyncio, sys
+from pathlib import Path
+
+from pyharness import Session
+from coding_harness import CodingAgentConfig
+from .runner import AutoresearchHarness
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="autoresearch")
     p.add_argument("prompt", nargs="*")
     p.add_argument("--workspace", type=Path, default=None)
     p.add_argument("--model", default=None)
+    p.add_argument("--agent", default=None)
     p.add_argument("--new", action="store_true",
                    help="Start a new session even if one exists in cwd.")
-    p.add_argument("--max-wall-seconds", type=int, default=None,
-                   help="Override the time-budget extension.")
+    p.add_argument("--max-wall-seconds", type=int, default=None)
     args = p.parse_args(argv)
+
+    prompt = " ".join(args.prompt).strip()
+    if not prompt:
+        sys.stderr.write("error: no prompt provided.\n")
+        return 2
 
     workspace = (args.workspace or Path.cwd()).resolve()
 
+    resume_from = None
     if not args.new:
         recent = Session.list_recent(workspace, n=1)
         if recent:
-            cfg.resume_from = recent[0].session_id
+            resume_from = recent[0].session_id
 
-    # ... rest as in build-finance-harness Step 7
-```
+    cli_overrides = {}
+    if args.max_wall_seconds is not None:
+        cli_overrides["max_wall_seconds"] = args.max_wall_seconds
 
-**Compaction tuning.** Lower `compaction_threshold_pct` so that
-long runs compact earlier and more aggressively (the disk notes are
-the durable record; the in-memory transcript is disposable):
-
-```python
-options = AgentOptions(
-    model=self.model,
-    max_turns=self.settings.max_turns,
-    model_context_window=self.settings.model_context_window,
-    compaction_threshold_pct=0.6,    # compact at 60% rather than 80%
-    settings_snapshot=self.settings.model_dump(),
-)
+    cfg = CodingAgentConfig(
+        workspace=workspace,
+        model=args.model,
+        agent_name=args.agent,
+        resume_from=resume_from,
+        cli_overrides=cli_overrides,
+    )
+    result = asyncio.run(AutoresearchHarness(cfg).run(prompt))
+    sys.stdout.write(result.final_output.rstrip() + "\n")
+    return 0 if result.completed else 1
 ```
 
 ---
 
-## Step 7 — Multi-agent through subprocesses
+## Step 6 — Multi-agent through subprocesses
 
 Pi-py refuses in-loop sub-agent delegation by design (see
-[`DESIGN.md`](../../DESIGN.md)). But long research often benefits
-from specialist sub-agents — a literature-review agent, a
-synthesis agent, an experiment-runner agent.
-
-The pi-py answer: spawn them as **subprocesses** that share the
-same disk-truth (the `notes/` and `RESEARCH_PLAN.md` files):
+[`DESIGN.md`](../../DESIGN.md)). For autoresearch, spawn specialist
+sub-agents as **subprocesses** that share the same disk-truth (the
+`notes/` directory and `RESEARCH_PLAN.md`):
 
 ```bash
-# Inside the system prompt or as a tool the orchestrator calls:
+# Inside the orchestrator's prompt or as a tool the orchestrator calls:
 $ autoresearch --agent literature-review "find prior work on Y"
 $ autoresearch --agent experiment-runner "test hypothesis Z"
-$ autoresearch --agent synthesise "produce report.md from notes/ and RESEARCH_PLAN.md"
+$ autoresearch --agent synthesise   "produce report.md from notes/ and RESEARCH_PLAN.md"
 ```
 
-Each subprocess gets its own session log, its own context window,
-its own retry budget. They communicate via files. The orchestrator
-agent reads their session logs (or just their final outputs) to
-incorporate results.
+Each subprocess gets its own session log, context window, and retry
+budget. They communicate via files. The orchestrator reads their
+session logs (or just their final outputs) to incorporate results.
+
+The `--agent` flag is provided for free by `coding-harness` — it
+loads `<scope>/.pyharness/agents/<name>.md` and uses that
+frontmatter to choose model + tool subset + system prompt body.
 
 ---
 
-## What you get for free from `pyharness-sdk`
+## What you get for free from `coding-harness`
 
-For an autoresearch harness specifically:
+For autoresearch specifically, what you didn't have to write:
 
-- **Session resume / fork by event sequence.** Mid-run interruption
-  isn't fatal — the agent picks up where it left off. Forking lets
-  you branch from a known-good state to explore alternatives.
-- **Transparent compaction.** The middle of a long transcript gets
-  summarised by the cheaper `summarization_model` while the system
-  prompt and recent turns stay verbatim. Critical for hundred-turn
-  runs.
-- **Steering queue.** `handle.steer("also check Y")` is consumed at
-  the next turn boundary — you can intervene from a parent process
-  or a UI without restarting.
-- **Pydantic-validated tools that don't crash.** A bad `pdf_read`
-  call returns `ok=False` with the error; the agent retries or
-  moves on rather than the run dying.
-- **Append-only JSONL log.** Every search query, every URL fetched,
-  every note appended is recorded. Auditability is built-in.
-- **Event bus for cross-cutting concerns.** Citation auditing,
-  budget enforcement, dedup of redundant searches — all extensions
-  rather than tool changes.
+- **Session resume / fork** (pyharness-sdk) wired through
+  `CodingAgentConfig.resume_from` / `fork_from` / `fork_at_event`.
+- **Transparent compaction** with a tunable threshold via
+  `Settings.compaction_threshold_pct`.
+- **Steering queue** via `agent.start()` + `handle.steer(...)`.
+- **JSONL session log**, replayable.
+- **Extension discovery** at `<scope>/.pyharness/extensions/` so
+  *users* of your harness can add their own audit / dedup / kill
+  switches without touching your code.
+- **Named sub-agent loading** for the multi-agent subprocess
+  pattern (Step 6).
+- **AGENTS.md walking** — research project conventions get included
+  in the system prompt automatically.
+- **Skills loader** — heavyweight skills like `notebook-execute`
+  load on demand rather than padding the system prompt.
+- **The whole `pyharness.Agent` loop**.
+
+What you wrote: research-specific tools, citation extension, time
+budget extension, settings extras, system prompt, ~30-line subclass,
+~30-line CLI. Everything else is inherited.
 
 ---
 
 ## See also
 
 - [`build-finance-harness.md`](build-finance-harness.md) — same
-  recipe, different domain. Read both for the cross-domain pattern.
-- [`packages/pyharness-sdk/README.md`](../../packages/pyharness-sdk/README.md)
-  — kernel API and the loop diagram.
+  pattern, different domain. Read alongside this for the recipe.
 - [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
-  — the worked example with full source you can read alongside this
-  guide.
+  — what you're inheriting; especially the `CodingAgent.__init__`
+  walkthrough.
+- [`packages/pyharness-sdk/README.md`](../../packages/pyharness-sdk/README.md)
+  — kernel API for the tools and extensions you write.

@@ -7,12 +7,24 @@ hierarchy, named sub-agents, skills, extensions discovery, eight
 built-in tools, and the `pyharness` CLI.
 
 Mirrors pi-mono's [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-as the application layer. Use this when you want pi-py as a
-ready-to-run coding agent. Skip it (and depend only on
-`pyharness-sdk`) when building a domain-specific harness with its
-own conventions — see
-[`../pyharness-sdk/README.md`](../pyharness-sdk/README.md) and the
-[extension guides](../../docs/guides/).
+as the application layer.
+
+**Two ways to use it:**
+
+1. As the bundled coding agent — `pyharness "fix the failing
+   tests"`. Most users.
+2. **As a base class for domain-specific harnesses** — finance,
+   autoresearch, quant research, etc. Subclass `CodingAgent` and
+   override a small set of hooks (system prompt, default tool
+   registry, settings class, tool timeouts, extra extensions) to
+   inherit the entire scaffolding (settings, AGENTS.md, named
+   sub-agents, skills, extensions discovery, assembly machinery).
+   See [`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
+   and [`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
+
+Skip `coding-harness` entirely (depend only on `pyharness-sdk`) only
+when your harness rejects the file-convention shape — see
+[`../pyharness-sdk/README.md`](../pyharness-sdk/README.md).
 
 ---
 
@@ -303,6 +315,54 @@ Top-level `examples/` directory in the repo:
 - `examples/extensions/audit_logger.py` — per-tool audit log.
 - `examples/extensions/circuit_breaker.py` — env-var kill switch.
 - `examples/skills/market-data/` — skill scaffold.
+
+## Subclassing for a domain-specific harness
+
+`CodingAgent` is designed to be subclassed. The override surface:
+
+| Hook | Default | Override to |
+| --- | --- | --- |
+| `BASE_SYSTEM_PROMPT` (class attr) | the coding-agent prompt | replace with your domain's prompt |
+| `_settings_class` (class attr) | `Settings` | a `Settings` subclass with typed extras |
+| `_default_tool_registry()` | `builtin_registry()` | a registry of your domain tools (or `super()._default_tool_registry()` plus extras) |
+| `_tool_timeouts()` | `{bash, web_fetch, web_search}` | timeouts for your tools (or merge with `super()._tool_timeouts()`) |
+| `_setup()` | builds registry / skills / system prompt / loads file extensions | call `super()._setup()` then install programmatic extensions on top |
+
+Every other hook (`_make_session`, `_build_system_prompt`,
+`_build_agent`, `_build_tool_registry`) is also overridable but
+rarely needs to be.
+
+Sketch:
+
+```python
+from pyharness import ExtensionAPI, ToolRegistry
+from coding_harness import CodingAgent, Settings
+
+class MySettings(Settings):
+    my_field: int = 42
+
+class MyHarness(CodingAgent):
+    BASE_SYSTEM_PROMPT = "You are ..."
+    _settings_class = MySettings
+
+    def _default_tool_registry(self) -> ToolRegistry:
+        return my_registry()
+
+    def _setup(self) -> None:
+        super()._setup()
+        api = ExtensionAPI(bus=self.event_bus, registry=self.tool_registry,
+                           settings=self.settings)
+        my_extension.install(api)
+```
+
+That's the entire harness class. You inherit settings loading,
+workspace + project root discovery, named sub-agents, skills,
+file-discovered extensions, project tools, session creation /
+resume / fork, compaction, and the SDK loop.
+
+Full walkthroughs:
+[`build-finance-harness.md`](../../docs/guides/build-finance-harness.md),
+[`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
 
 ## Public surface
 

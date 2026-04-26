@@ -62,34 +62,50 @@ named agents, skills, and extensions, see
 
 ## Extending
 
-### Build your own harness on `pyharness-sdk`
+### Build your own harness by subclassing `coding-harness`
 
-The SDK gives you the loop and primitives; everything else is your
-choice. The recipe in four steps:
+`coding-harness` already provides every piece of scaffolding a
+domain harness needs that isn't actually domain-specific: settings
+hierarchy, AGENTS.md walking, project root discovery, named
+sub-agents, on-demand skills, extension discovery, and the assembly
+machinery that ties them to the SDK loop. **Reuse it.**
 
-1. Define the tools your agent needs (e.g. for finance: price
-   lookups, position queries, order placement) as `Tool` subclasses
-   with Pydantic args.
-2. Pick the file conventions for your domain — e.g. a
-   `~/.finance-harness/` directory with strategy definitions,
-   broker credentials, and audit settings.
-3. Write a small assembly layer that loads those, builds a
-   `ToolRegistry`, constructs a system prompt from your strategy
-   files, and instantiates `pyharness.Agent`.
-4. Subscribe extensions to the event bus for cross-cutting concerns
-   (audit logging, P&L tracking, kill switches).
+You only write what's actually domain-specific:
 
-`coding-harness` is the worked example of this pattern — read its
-source for the assembly shape. End-to-end recipes for two specific
-verticals:
+1. **Tools** — Pydantic-backed `pyharness.Tool` subclasses for your
+   domain (e.g. for finance: `get_quote`, `place_order`).
+2. **Settings extras** — a `FinanceSettings(coding_harness.Settings)`
+   adding typed fields (`max_position_usd`, `enable_live_orders`).
+3. **System prompt** — your domain's instructions.
+4. **Always-on extensions** — risk gates, time budgets, audit logs
+   subscribed to the event bus.
+5. **A subclass of `CodingAgent`** that overrides 3-4 hooks
+   (`BASE_SYSTEM_PROMPT`, `_settings_class`, `_default_tool_registry`,
+   `_tool_timeouts`) and installs your extensions in `_setup`.
+6. **A thin CLI** (~30 lines).
+
+The whole harness ends up at ~100 lines plus tools.
+
+End-to-end recipes:
 
 - → [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md)
 - → [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md)
 
-The same recipe applies to quant research, ops harnesses, and so on.
+→ The override surface in detail:
+[`packages/coding-harness/README.md`](packages/coding-harness/README.md)
+(see *Subclassing for a domain-specific harness*).
 
-→ Kernel API surface, loop diagram, and public symbols:
+→ Kernel API for the tools and extensions you write:
 [`packages/pyharness-sdk/README.md`](packages/pyharness-sdk/README.md)
+
+#### When to start from `pyharness-sdk` directly instead
+
+Skip `coding-harness` and build straight on the SDK only when your
+harness genuinely **rejects** the file-convention shape — e.g. a
+remote-orchestration harness with no workspace, or a streaming
+harness whose "session" is a network connection rather than a JSONL
+file. For domain harnesses that look like *"different prompt +
+different tools + different guard rails"*, subclass.
 
 ### Extend `coding-harness` for a specific codebase or workflow
 
