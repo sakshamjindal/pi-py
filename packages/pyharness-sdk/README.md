@@ -96,10 +96,17 @@ The loop terminates when:
 - No CLI.
 
 This is the kernel. Anything that imposes file conventions or scoping
-rules belongs one layer up. See
-[`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
-and [`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md)
-for end-to-end examples of one layer up.
+rules belongs one layer up.
+
+**For domain-specific harnesses** (finance, autoresearch, etc.), you
+typically don't need to use the SDK directly. Instead, use
+`coding-harness` with a project directory containing your domain's
+tools, agents, skills, and extensions in `.pyharness/`. The
+project-as-files pattern lets you build any domain harness without
+writing assembly code. See
+[`docs/guides/build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
+and
+[`docs/guides/build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
 
 ---
 

@@ -7,12 +7,21 @@ hierarchy, named sub-agents, skills, extensions discovery, eight
 built-in tools, and the `pyharness` CLI.
 
 Mirrors pi-mono's [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-as the application layer. Use this when you want pi-py as a
-ready-to-run coding agent. Skip it (and depend only on
-`pyharness-sdk`) when building a domain-specific harness with its
-own conventions — see
-[`../pyharness-sdk/README.md`](../pyharness-sdk/README.md) and the
-[extension guides](../../docs/guides/).
+as the application layer.
+
+Despite the name, `coding-harness` is domain-agnostic. The assembly
+layer — settings hierarchy, AGENTS.md walking, named agents, skills,
+extensions discovery, tool resolution — works for any domain. The
+`BASE_SYSTEM_PROMPT` is generic; domain identity comes from your
+AGENTS.md and agent definitions.
+
+To build a finance harness, an autoresearch harness, or any other
+domain harness: set up a project directory with `.pyharness/` files
+and point `CodingAgent` at it. No subclassing needed.
+
+See the full guides:
+- [`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
+- [`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md)
 
 ---
 
@@ -303,6 +312,27 @@ Top-level `examples/` directory in the repo:
 - `examples/extensions/audit_logger.py` — per-tool audit log.
 - `examples/extensions/circuit_breaker.py` — env-var kill switch.
 - `examples/skills/market-data/` — skill scaffold.
+
+## Using coding-harness for non-coding domains
+
+```python
+# Drive a finance agent from Python
+agent = CodingAgent(CodingAgentConfig(
+    workspace=Path("/finance"),
+    agent_name="research-analyst",
+))
+result = await agent.run("deep dive on AAPL")
+```
+
+Or from the CLI:
+
+```bash
+pyharness --workspace /finance --agent research-analyst "deep dive on AAPL"
+```
+
+Full walkthroughs:
+[`build-finance-harness.md`](../../docs/guides/build-finance-harness.md),
+[`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
 
 ## Public surface
 
