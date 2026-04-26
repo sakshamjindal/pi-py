@@ -268,6 +268,5 @@ The loop terminates when:
 - [`coding-harness`](../coding-harness/) — application built on this kernel
 - [`tui`](../tui/) — minimal interactive shell
 - [`DESIGN.md`](../../DESIGN.md) — principles and architecture
-- [`examples/simulations/`](../../examples/simulations/) — scenario harness exercising loop termination, tool edge cases, extension/skill failures, compaction, sessions
 - [docs/guides/build-finance-harness.md](../../docs/guides/build-finance-harness.md)
 - [docs/guides/build-autoresearch-harness.md](../../docs/guides/build-autoresearch-harness.md)

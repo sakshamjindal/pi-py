@@ -506,28 +506,6 @@ Full guide: [docs/guides/orchestration.md](../../docs/guides/orchestration.md).
 
 ---
 
-## Scenario simulations
-
-[`examples/simulations/`](../../examples/simulations/) is a scenario
-harness that exercises LLM failures, tool edge cases (timeouts,
-truncation, validation, raises), extension and skill silent-error
-paths, loop termination modes, compaction, session resume / fork, and
-concurrent agents. Each scenario file is both a runnable script and a
-pytest module included in CI.
-
-```bash
-python -m pytest examples/simulations/        # CI integration
-python examples/simulations/run.py             # friendly runner
-PYHARNESS_LIVE_API=1 ANTHROPIC_API_KEY=sk-... \\
-    python examples/simulations/run.py --live  # end-to-end with real LLM
-```
-
-Live scenarios (`test_live_e2e.py`) hit the real Anthropic API and are
-skipped unless `PYHARNESS_LIVE_API=1` is set. Mock scenarios run in
-under 3 seconds.
-
----
-
 ## Sessions
 
 Every run writes a JSONL log to
