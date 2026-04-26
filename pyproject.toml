@@ -28,6 +28,7 @@ asyncio_mode = "auto"
 testpaths = [
     "packages/pyharness-sdk/tests",
     "packages/harness/tests",
+    "packages/tui/tests",
 ]
 
 [tool.ruff]
