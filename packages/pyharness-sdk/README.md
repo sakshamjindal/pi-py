@@ -98,20 +98,15 @@ The loop terminates when:
 This is the kernel. Anything that imposes file conventions or scoping
 rules belongs one layer up.
 
-**Most domain harnesses don't need to build that layer from scratch
-on the SDK** — they should subclass
-[`coding_harness.CodingAgent`](../coding-harness/) instead, since
-its file conventions (AGENTS.md, named sub-agents, skills,
-extensions discovery, settings hierarchy) are domain-agnostic. The
-guides at
-[`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
-and [`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md)
-walk through the subclass pattern.
-
-You start from `pyharness-sdk` directly only when your harness
-genuinely **rejects** the file-convention shape — e.g. a remote-
-orchestration harness with no workspace, or a streaming harness
-whose "session" is a network connection rather than a JSONL file.
+**For domain-specific harnesses** (finance, autoresearch, etc.), you
+typically don't need to use the SDK directly. Instead, use
+`coding-harness` with a project directory containing your domain's
+tools, agents, skills, and extensions in `.pyharness/`. The
+project-as-files pattern lets you build any domain harness without
+writing assembly code. See
+[`docs/guides/build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
+and
+[`docs/guides/build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
 
 ---
 

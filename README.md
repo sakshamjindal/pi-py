@@ -60,71 +60,69 @@ That's enough to use the coding harness today. For flags, settings,
 named agents, skills, and extensions, see
 [`packages/coding-harness/README.md`](packages/coding-harness/README.md).
 
-## Extending
+## Extending: the project-as-files pattern
 
-### Build your own harness by subclassing `coding-harness`
+**You don't subclass anything.** You set up a project directory with the
+right files in `<project>/.pyharness/` and run
+`pyharness --workspace /your/project --agent <name> "task"`.
 
-`coding-harness` already provides every piece of scaffolding a
-domain harness needs that isn't actually domain-specific: settings
-hierarchy, AGENTS.md walking, project root discovery, named
-sub-agents, on-demand skills, extension discovery, and the assembly
-machinery that ties them to the SDK loop. **Reuse it.**
+Pyharness is the engine. A "finance harness" or "autoresearch harness"
+is just a project directory with domain-specific tools, agent definitions,
+skills, extensions, and an AGENTS.md — files that pyharness consumes.
+Pyharness doesn't know what domain it's running in.
 
-You only write what's actually domain-specific:
+The project layout:
 
-1. **Tools** — Pydantic-backed `pyharness.Tool` subclasses for your
-   domain (e.g. for finance: `get_quote`, `place_order`).
-2. **Settings extras** — a `FinanceSettings(coding_harness.Settings)`
-   adding typed fields (`max_position_usd`, `enable_live_orders`).
-3. **System prompt** — your domain's instructions.
-4. **Always-on extensions** — risk gates, time budgets, audit logs
-   subscribed to the event bus.
-5. **A subclass of `CodingAgent`** that overrides 3-4 hooks
-   (`BASE_SYSTEM_PROMPT`, `_settings_class`, `_default_tool_registry`,
-   `_tool_timeouts`) and installs your extensions in `_setup`.
-6. **A thin CLI** (~30 lines).
+```
+/your-project/
+  AGENTS.md                              # domain philosophy
+  .pyharness/
+    settings.json                        # model defaults, cost caps, domain-specific keys
+    agents/                              # named agent definitions
+      analyst.md                         # frontmatter: name, model, tools list; body: system prompt
+      reviewer.md
+    tools/                               # domain tools (Python modules with TOOLS = [...])
+      market_data.py                     # get_quote, get_fundamentals, ...
+      proposals.py                       # propose_trade, flag_for_review, ...
+    skills/                              # on-demand capability bundles
+      options-analysis/{SKILL.md, tools.py}
+    extensions/                          # lifecycle hooks
+      audit_logger.py                    # register(api) -> subscribe to events
+      circuit_breaker.py
+  workflows/                             # orchestration: plain Python driving CodingAgent
+    morning_routine.py
+```
 
-The whole harness ends up at ~100 lines plus tools.
+Then drive it:
 
-End-to-end recipes:
+```python
+from coding_harness import CodingAgent, CodingAgentConfig
 
-- → [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md)
-- → [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md)
+agent = CodingAgent(CodingAgentConfig(
+    workspace=Path("/your-project"),
+    agent_name="analyst",
+))
+result = await agent.run("deep dive on AAPL")
+```
 
-→ The override surface in detail:
+Or from the CLI:
+
+```bash
+pyharness --workspace /your-project --agent analyst "deep dive on AAPL"
+```
+
+Full worked examples:
+
+- **Finance:** [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md) —
+  30-50 tools, 5 agents, orchestrated morning routine, eval suite, feedback loop.
+- **Autoresearch:** [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md) —
+  research tools, literature review / synthesis / experiment agents, iterative research loop.
+
+→ Conventions, per-feature docs:
 [`packages/coding-harness/README.md`](packages/coding-harness/README.md)
-(see *Subclassing for a domain-specific harness*).
 
-→ Kernel API for the tools and extensions you write:
+→ SDK primitives and public API:
 [`packages/pyharness-sdk/README.md`](packages/pyharness-sdk/README.md)
-
-#### When to start from `pyharness-sdk` directly instead
-
-Skip `coding-harness` and build straight on the SDK only when your
-harness genuinely **rejects** the file-convention shape — e.g. a
-remote-orchestration harness with no workspace, or a streaming
-harness whose "session" is a network connection rather than a JSONL
-file. For domain harnesses that look like *"different prompt +
-different tools + different guard rails"*, subclass.
-
-### Extend `coding-harness` for a specific codebase or workflow
-
-If your use case fits the coding-agent shape but needs custom
-behaviour (a project-specific tool, a guard rail, a notification on
-each run), you don't need a new harness — extend coding-harness:
-
-- **Project tools** at `<project>/.pyharness/tools/<name>.py` —
-  Python modules exposing a `TOOLS` list.
-- **Skills** at `<project>/.pyharness/skills/<name>/` — on-demand
-  capability bundles loaded via the `load_skill` tool.
-- **Named sub-agents** at `<project>/.pyharness/agents/<name>.md` —
-  alternate system prompts + tool subsets, invoked with `--agent`.
-- **Extensions** at `<project>/.pyharness/extensions/<name>.py` —
-  subscribe to lifecycle events; deny / replace / observe LLM calls
-  and tool invocations.
-
-→ Conventions, examples, and per-feature docs:
-[`packages/coding-harness/README.md`](packages/coding-harness/README.md)
 
 ## Lineage
 

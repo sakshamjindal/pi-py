@@ -1,410 +1,394 @@
-# Building an autoresearch harness on `coding-harness`
+# Building an Autoresearch Harness on pyharness
 
-This guide walks through building **`autoresearch-harness`** — a
-domain-specific harness for long-horizon research tasks: read
-sources, take notes, run experiments, write synthesis reports — by
-**subclassing `coding_harness.CodingAgent`**.
+Same mental model as the finance harness: pyharness is the engine, the
+autoresearch harness is a project directory with the right files.
+**Pyharness doesn't know it's running research — it just runs whatever
+AGENTS.md and tools you give it.**
 
-Read [`build-finance-harness.md`](build-finance-harness.md) first;
-this guide assumes you've seen the subclass pattern and only
-elaborates the autoresearch-specific concerns. The defining trait of
-autoresearch is that runs are **long** (often hundreds of turns),
-**iterative** (notes accumulate; the agent revisits its own
-outputs), and **structured** (a plan file is the shared truth
-between turns). The features that matter most: context compaction,
-session resume, the steering queue, and disk-as-truth.
+The autoresearch harness automates the research process: literature review,
+hypothesis formation, experiment execution, synthesis, and writing. Disk
+is truth. Citations are mandatory. Time budgets prevent runaway costs.
 
 ---
 
-## What's reused from `coding-harness`
-
-Almost everything. Look at the table:
-
-| Coding agent has | Autoresearch reuses / adds |
-| --- | --- |
-| AGENTS.md (project conventions) | reused — research project conventions go in `AGENTS.md` |
-| Named sub-agents | adds `literature-review.md`, `synthesise.md`, `experiment-runner.md` at `<scope>/.pyharness/agents/` |
-| Skills (market-data) | adds `pubmed-search`, `arxiv-fetch`, `notebook-execute` at `<scope>/.pyharness/skills/` |
-| Built-in tools (read/write/edit/grep/glob/web_search/web_fetch) | **mostly reuses these as-is** plus adds `pdf_read`, `note_append`, `note_list`, `cite_lookup`, `notebook_run` |
-| Settings hierarchy | reused — `AutoresearchSettings(Settings)` adds typed extras |
-| Extension discovery | reused — citation-audit and time-budget extensions ship with autoresearch and are also user-extensible |
-| `pyharness "task"` CLI | replaced by your own `autoresearch "task"` thin wrapper |
-
-The big difference from finance: **autoresearch keeps several of the
-coding built-ins** because reading files, writing files, grepping
-notes, and fetching web pages are exactly what a researcher does.
-You augment the registry rather than replace it.
-
----
-
-## Step 1 — Project layout
+## The directory structure
 
 ```
-autoresearch-harness/
-  pyproject.toml
-  src/autoresearch_harness/
-    __init__.py
-    cli.py            # `autoresearch` entry point
-    runner.py         # AutoresearchHarness(CodingAgent) subclass
-    config.py         # AutoresearchSettings — model, citation style, time budget
-    extensions/
-      time_budget.py  # cap total wall-time per run
-      cite_audit.py   # block synthesis steps if claims lack citations
+/research-project/
+  README.md
+  AGENTS.md                                    # research philosophy
+
+  .pyharness/
+    settings.json                              # defaults: model, time budget, citation style
+    agents/
+      literature-review.md                     # searches, reads, summarises papers
+      synthesise.md                            # combines findings into coherent narrative
+      experiment-runner.md                     # runs computational experiments
+      critic.md                                # challenges claims, checks citations
     tools/
-      __init__.py     # research_registry() — coding builtins + research tools
-      pdf.py          # pdf_read
-      notes.py        # note_append, note_list — durable on-disk notes
-      cite.py         # cite_lookup, bibtex_emit
-      notebook.py     # notebook_run for code-bearing skills
-  tests/
-```
+      __init__.py
+      notes.py                                 # note_append, note_list, note_search
+      pdf.py                                   # pdf_read, pdf_extract_figures
+      cite.py                                  # cite_lookup, cite_format, cite_verify
+      notebook.py                              # notebook_run, notebook_create
+      data.py                                  # dataset_load, dataset_describe
+    skills/
+      pubmed-search/
+        SKILL.md
+        tools.py                               # pubmed_search, pubmed_fetch_abstract
+      arxiv-fetch/
+        SKILL.md
+        tools.py                               # arxiv_search, arxiv_download
+      statistical-tests/
+        SKILL.md
+        tools.py                               # run_ttest, run_anova, run_regression
+    extensions/
+      cite_audit.py                            # blocks synthesis writes without citations
+      time_budget.py                           # wall-time cap from settings
 
-`pyproject.toml`:
+  notes/                                       # disk-as-truth: all findings live here
+    literature/                                # paper summaries and extracts
+    hypotheses/                                # stated hypotheses with evidence
+    experiments/                               # experiment logs and results
+    synthesis/                                 # draft synthesis documents
+    gaps/                                      # identified knowledge gaps
 
-```toml
-[project]
-name = "autoresearch-harness"
-version = "0.1.0"
-requires-python = ">=3.11"
-dependencies = [
-  "pyharness",
-  "coding-harness",
-  "pypdf>=4.0",
-  # search-provider SDK, jupyter client, etc.
-]
+  data/                                        # datasets and processed data
+    raw/
+    processed/
 
-[project.scripts]
-autoresearch = "autoresearch_harness.cli:main"
+  notebooks/                                   # computational notebooks
+    exploratory/
+    final/
+
+  RESEARCH_PLAN.md                             # living research plan
+
+  workflows/
+    research_loop.py                           # iterative research workflow
+    literature_sweep.py                        # broad literature search
+    deep_read.py                               # focused reading of specific papers
 ```
 
 ---
 
-## Step 2 — Notes and the plan file: disk-as-truth
+## The AGENTS.md
 
-The single most important design choice for an autoresearch agent
-is: **make notes/plan files the agent's working memory, not its
-context window.** Long runs blow up context; compaction helps but
-lossy summaries hurt research quality. The fix is two new tools and
-a system-prompt directive.
+```markdown
+# /research-project/AGENTS.md
+
+# Research Project
+
+## Philosophy
+
+- **Skepticism first.** Every claim needs evidence. Every finding needs
+  a citation. If you can't cite it, you can't claim it.
+- **Disk is truth.** All findings, hypotheses, and evidence live in files.
+  The context window is working memory; disk is long-term memory. If you
+  discovered something important, write it to notes/ before moving on.
+- **Falsifiability.** Every hypothesis must state what would disprove it.
+- **Incremental progress.** Each research session should leave the notes/
+  directory in a better state than it found it.
+
+## Citation standards
+
+- Every factual claim must cite a specific source
+- Citations use the format: [Author et al., Year, Section/Page]
+- When summarising a paper, always include the DOI or arXiv ID
+- Never paraphrase without attribution
+- If two sources disagree, note the disagreement explicitly
+
+## Failure modes to avoid
+
+- **Citation laundering.** Don't cite a review paper when you mean the
+  original study. Go to the primary source.
+- **Confirmation bias.** Search for evidence against your hypothesis as
+  hard as evidence for it.
+- **Scope creep.** Stay focused on the research question. Note tangential
+  findings in notes/gaps/ for later.
+- **Premature synthesis.** Don't write the synthesis until you've done
+  the reading.
+```
+
+---
+
+## Agent definitions
+
+```markdown
+# /research-project/.pyharness/agents/literature-review.md
+
+---
+name: literature-review
+description: Searches for, reads, and summarises academic papers
+model: claude-opus-4-7
+tools:
+  - read
+  - write
+  - edit
+  - grep
+  - glob
+  - web_search
+  - web_fetch
+  - note_append
+  - note_list
+  - note_search
+  - pdf_read
+  - cite_lookup
+  - cite_verify
+workdir: /research-project
+---
+
+# Literature Review Agent
+
+You search for academic papers, read them, and produce structured summaries
+in notes/literature/.
+
+## Workflow
+
+1. Read RESEARCH_PLAN.md to understand the research question
+2. Read notes/literature/ to see what's already been covered
+3. Search for relevant papers
+4. For each relevant paper:
+   a. Read the abstract and introduction
+   b. If relevant, read methods and results
+   c. Write a summary to notes/literature/{author-year-slug}.md
+   d. Extract key claims with citations
+   e. Note contradictions with existing findings
+5. Update notes/gaps/ with identified knowledge gaps
+
+## Skills available
+- pubmed-search: For biomedical/life sciences literature
+- arxiv-fetch: For physics, CS, math preprints
+```
+
+---
+
+## Tools
 
 ```python
-# src/autoresearch_harness/tools/notes.py
-import re
-from datetime import datetime
+# /research-project/.pyharness/tools/notes.py
+from __future__ import annotations
+
+from pathlib import Path
 
 from pydantic import BaseModel, Field
-from pyharness import Tool, ToolContext, safe_path
+
+from pyharness import Tool, ToolContext
 
 
-class _AppendArgs(BaseModel):
-    topic: str = Field(description="Short tag — becomes the filename slug.")
-    content: str = Field(description="Markdown body to append.")
+class _NoteAppendArgs(BaseModel):
+    path: str = Field(description="Relative path under notes/, e.g. 'literature/smith-2024.md'")
+    content: str = Field(description="Content to append")
+
+
+class _NoteAppendResult(BaseModel):
+    path: str
+    written: bool
 
 
 class NoteAppendTool(Tool):
     name = "note_append"
-    description = (
-        "Append a timestamped markdown note under notes/<topic>.md. "
-        "Use this whenever you find something worth remembering across "
-        "turns — citations, hypotheses, open questions, contradictions."
-    )
-    args_schema = _AppendArgs
+    description = "Append content to a note file. Creates the file if it doesn't exist."
+    args_schema = _NoteAppendArgs
+    result_schema = _NoteAppendResult
 
-    async def execute(self, args, ctx: ToolContext):
-        notes_dir = safe_path(ctx.workspace, "notes")
-        notes_dir.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^a-z0-9-]+", "-", args.topic.lower()).strip("-")
-        path = notes_dir / f"{slug}.md"
-        ts = datetime.utcnow().isoformat(timespec="seconds")
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(f"\n## {ts}\n\n{args.content}\n")
-        return {"ok": True, "path": str(path), "bytes": path.stat().st_size}
+    async def execute(self, args: _NoteAppendArgs, ctx: ToolContext) -> _NoteAppendResult:
+        full_path = Path(ctx.workspace) / "notes" / args.path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        with full_path.open("a", encoding="utf-8") as fh:
+            fh.write(args.content + "\n")
+        return _NoteAppendResult(path=str(full_path), written=True)
 
 
-class _ListArgs(BaseModel):
-    pass
+class _NoteListArgs(BaseModel):
+    directory: str = Field(default="", description="Subdirectory under notes/ to list")
+
+
+class _NoteListResult(BaseModel):
+    files: list[str]
 
 
 class NoteListTool(Tool):
     name = "note_list"
-    description = "List all notes by topic with their last-modified time."
-    args_schema = _ListArgs
+    description = "List note files in a directory under notes/."
+    args_schema = _NoteListArgs
+    result_schema = _NoteListResult
 
-    async def execute(self, args, ctx: ToolContext):
-        notes_dir = safe_path(ctx.workspace, "notes")
+    async def execute(self, args: _NoteListArgs, ctx: ToolContext) -> _NoteListResult:
+        notes_dir = Path(ctx.workspace) / "notes" / args.directory
         if not notes_dir.is_dir():
-            return []
-        return sorted(
-            ({"topic": p.stem, "mtime": p.stat().st_mtime}
-             for p in notes_dir.glob("*.md")),
-            key=lambda r: r["mtime"], reverse=True,
-        )
+            return _NoteListResult(files=[])
+        files = sorted(str(f.relative_to(notes_dir)) for f in notes_dir.rglob("*.md"))
+        return _NoteListResult(files=files)
+
+
+TOOLS = [
+    NoteAppendTool(),
+    NoteListTool(),
+]
 ```
-
-In your registry, **augment** the coding built-ins rather than
-replacing them — `read`/`write`/`grep`/`glob`/`web_search`/`web_fetch`
-are exactly what you need to interrogate notes and read sources:
-
-```python
-# src/autoresearch_harness/tools/__init__.py
-from coding_harness import builtin_registry
-
-from .notes import NoteAppendTool, NoteListTool
-from .pdf import PdfReadTool
-from .cite import CiteLookupTool
-from .notebook import NotebookRunTool
-
-
-def research_registry():
-    reg = builtin_registry()  # read/write/edit/bash/grep/glob/web_*
-    reg.register(NoteAppendTool())
-    reg.register(NoteListTool())
-    reg.register(PdfReadTool())
-    reg.register(CiteLookupTool())
-    reg.register(NotebookRunTool())
-    return reg
-```
-
-(For an autoresearch desk that should *not* execute shell, you'd
-unregister `bash` here — that's a one-liner.)
 
 ---
 
-## Step 3 — Citation audit + time budget extensions
-
-Two cross-cutting concerns ship with the harness and are installed
-in `_setup`:
+## Extensions
 
 ```python
-# src/autoresearch_harness/extensions/cite_audit.py
-import re
+# /research-project/.pyharness/extensions/cite_audit.py
+"""Blocks writes to notes/synthesis/ that don't contain citations."""
+
 from pyharness import ExtensionAPI, HookOutcome
 
-_CITE_RE = re.compile(r"\[@[a-z0-9_-]+\]", re.I)
+
+def register(api: ExtensionAPI) -> None:
+    api.on("after_tool_call", _check_citations)
 
 
-def install(api: ExtensionAPI) -> None:
-    api.on("before_tool_call", _gate)
+async def _check_citations(event, ctx):
+    tool_name = event.payload.get("tool_name")
+    if tool_name not in ("write", "edit", "note_append"):
+        return HookOutcome.cont()
 
-
-async def _gate(event, ctx):
-    name = event.payload.get("tool_name")
     args = event.payload.get("arguments") or {}
-    if name == "write" and args.get("path", "").endswith(("synthesis.md", "report.md")):
-        content = args.get("content", "")
-        headings = [h for h in content.splitlines() if h.startswith("#")]
-        cites = _CITE_RE.findall(content)
-        if headings and len(cites) < len(headings):
-            return HookOutcome.deny(
-                f"synthesis must cite — found {len(cites)} cite tags "
-                f"for {len(headings)} sections. Use [@cite-key] format."
-            )
+    path = args.get("file_path") or args.get("path") or ""
+    if "synthesis" not in path:
+        return HookOutcome.cont()
+
+    content = args.get("content") or args.get("new_string") or ""
+    if "[" not in content and "et al" not in content.lower():
+        import sys
+        sys.stderr.write(
+            f"[cite_audit] WARNING: write to synthesis path {path} "
+            f"contains no apparent citations\n"
+        )
+
     return HookOutcome.cont()
 ```
 
 ```python
-# src/autoresearch_harness/extensions/time_budget.py
+# /research-project/.pyharness/extensions/time_budget.py
+"""Wall-time cap from settings.max_wall_seconds."""
+
 import time
 from pyharness import ExtensionAPI, HookOutcome
 
+_DEFAULT_MAX_SECONDS = 3600
 
-def install(api: ExtensionAPI, max_wall_seconds: int) -> None:
-    deadline = time.monotonic() + max_wall_seconds
 
-    async def _gate(event, ctx):
-        if time.monotonic() > deadline:
-            return HookOutcome.deny(
-                f"wall-time budget exhausted ({max_wall_seconds}s); "
-                "end the run with a final summary based on disk notes."
-            )
+def register(api: ExtensionAPI) -> None:
+    max_seconds = (
+        api.settings.get("max_wall_seconds", _DEFAULT_MAX_SECONDS)
+        if api.settings
+        else _DEFAULT_MAX_SECONDS
+    )
+    state = {"start": 0.0}
+
+    async def _on_start(event, ctx):
+        state["start"] = time.monotonic()
         return HookOutcome.cont()
 
-    api.on("before_llm_call", _gate)
-    api.on("before_tool_call", _gate)
+    async def _on_llm(event, ctx):
+        elapsed = time.monotonic() - state["start"]
+        if elapsed > max_seconds:
+            return HookOutcome.deny(f"Time budget exceeded: {elapsed:.0f}s > {max_seconds}s")
+        return HookOutcome.cont()
+
+    api.on("session_start", _on_start)
+    api.on("before_llm_call", _on_llm)
 ```
 
 ---
 
-## Step 4 — The harness class: ~30 lines
+## Orchestration: the research loop
 
 ```python
-# src/autoresearch_harness/runner.py
-from pyharness import ExtensionAPI, ToolRegistry
-from coding_harness import CodingAgent
-
-from .config import AutoresearchSettings
-from .extensions import cite_audit, time_budget
-from .tools import research_registry
-
-
-RESEARCH_PROMPT = """\
-You are a long-horizon research agent. Your job is to investigate a
-topic deeply, take rigorous notes, and produce a defensible
-synthesis.
-
-Disk is your memory. Your context window is working memory only.
-
-- Use `note_append` after every meaningful finding. Tag it.
-- Update `RESEARCH_PLAN.md` whenever the plan changes.
-- Before starting a new line of inquiry, call `note_list` and
-  `read RESEARCH_PLAN.md` to remind yourself what's known.
-- Cite everything in synthesis output using `[@cite-key]` shorthand.
-- When you hit a wall-time or budget limit, summarise from notes
-  rather than starting new searches.
-
-Tool usage:
-- Prefer `web_search` for breadth, `web_fetch` for depth.
-- For PDFs use `pdf_read`. For code-bearing analysis, `notebook_run`.
-"""
-
-
-class AutoresearchHarness(CodingAgent):
-    BASE_SYSTEM_PROMPT = RESEARCH_PROMPT
-    _settings_class = AutoresearchSettings
-
-    def _default_tool_registry(self) -> ToolRegistry:
-        return research_registry()
-
-    def _tool_timeouts(self) -> dict[str, float]:
-        # Inherit the coding defaults (bash/web_*) and add research-specific.
-        tt = super()._tool_timeouts()
-        tt.update({
-            "pdf_read":     30.0,
-            "notebook_run": 120.0,
-        })
-        return tt
-
-    def _setup(self) -> None:
-        super()._setup()
-        api = ExtensionAPI(
-            bus=self.event_bus,
-            registry=self.tool_registry,
-            settings=self.settings,
-        )
-        cite_audit.install(api)
-        time_budget.install(api, max_wall_seconds=self.settings.max_wall_seconds)
-```
-
-`AutoresearchSettings` is a 5-line subclass of `Settings` adding
-`max_wall_seconds`, `citation_style`, `compaction_threshold_pct=0.6`
-(more aggressive than the coding default of 0.8), etc.
-
----
-
-## Step 5 — CLI: resume by default
-
-Long runs get interrupted. Make the CLI default to **continuing**
-the most recent session in cwd, with `--new` to opt out:
-
-```python
-# src/autoresearch_harness/cli.py
-import argparse, asyncio, sys
+# /research-project/workflows/research_loop.py
+import argparse
+import asyncio
 from pathlib import Path
 
-from pyharness import Session
-from coding_harness import CodingAgentConfig
-from .runner import AutoresearchHarness
+from coding_harness import CodingAgent, CodingAgentConfig
+
+PROJECT = Path("/research-project")
 
 
-def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="autoresearch")
-    p.add_argument("prompt", nargs="*")
-    p.add_argument("--workspace", type=Path, default=None)
-    p.add_argument("--model", default=None)
-    p.add_argument("--agent", default=None)
-    p.add_argument("--new", action="store_true",
-                   help="Start a new session even if one exists in cwd.")
-    p.add_argument("--max-wall-seconds", type=int, default=None)
-    args = p.parse_args(argv)
+async def run_agent(agent_name: str, prompt: str):
+    config = CodingAgentConfig(workspace=PROJECT, agent_name=agent_name)
+    agent = CodingAgent(config)
+    return await agent.run(prompt)
 
-    prompt = " ".join(args.prompt).strip()
-    if not prompt:
-        sys.stderr.write("error: no prompt provided.\n")
-        return 2
 
-    workspace = (args.workspace or Path.cwd()).resolve()
-
-    resume_from = None
-    if not args.new:
-        recent = Session.list_recent(workspace, n=1)
-        if recent:
-            resume_from = recent[0].session_id
-
-    cli_overrides = {}
-    if args.max_wall_seconds is not None:
-        cli_overrides["max_wall_seconds"] = args.max_wall_seconds
-
-    cfg = CodingAgentConfig(
-        workspace=workspace,
-        model=args.model,
-        agent_name=args.agent,
-        resume_from=resume_from,
-        cli_overrides=cli_overrides,
+async def new_research(question: str):
+    plan_path = PROJECT / "RESEARCH_PLAN.md"
+    plan_path.write_text(
+        f"# Research Plan\n\n## Question\n{question}\n\n"
+        f"## Status\nIn progress -- literature review phase.\n",
+        encoding="utf-8",
     )
-    result = asyncio.run(AutoresearchHarness(cfg).run(prompt))
-    sys.stdout.write(result.final_output.rstrip() + "\n")
-    return 0 if result.completed else 1
+    await research_cycle()
+
+
+async def research_cycle():
+    # Step 1: Literature review
+    await run_agent(
+        "literature-review",
+        "Search for papers relevant to the research question in RESEARCH_PLAN.md. "
+        "Summarise each relevant paper in notes/literature/. "
+        "Update notes/gaps/ with knowledge gaps."
+    )
+
+    # Step 2: Experiments (if hypotheses exist)
+    hypotheses_dir = PROJECT / "notes" / "hypotheses"
+    if hypotheses_dir.is_dir() and list(hypotheses_dir.glob("*.md")):
+        await run_agent(
+            "experiment-runner",
+            "Check notes/hypotheses/ for testable hypotheses. "
+            "Run experiments and record results in notes/experiments/."
+        )
+
+    # Step 3: Synthesis
+    await run_agent(
+        "synthesise",
+        "Read all findings in notes/literature/ and notes/experiments/. "
+        "Update the synthesis in notes/synthesis/. Every claim must have a citation."
+    )
+
+
+async def main():
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--new", type=str, help="Start new research with this question")
+    group.add_argument("--resume", action="store_true", help="Continue from existing state")
+    args = parser.parse_args()
+
+    if args.new:
+        await new_research(args.new)
+    else:
+        await research_cycle()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ---
 
-## Step 6 — Multi-agent through subprocesses
+## What changes in pyharness for autoresearch
 
-Pi-py refuses in-loop sub-agent delegation by design (see
-[`DESIGN.md`](../../DESIGN.md)). For autoresearch, spawn specialist
-sub-agents as **subprocesses** that share the same disk-truth (the
-`notes/` directory and `RESEARCH_PLAN.md`):
+**Nothing.** Same answer as finance. You set up a project directory with
+the right files in `.pyharness/` and run:
 
 ```bash
-# Inside the orchestrator's prompt or as a tool the orchestrator calls:
-$ autoresearch --agent literature-review "find prior work on Y"
-$ autoresearch --agent experiment-runner "test hypothesis Z"
-$ autoresearch --agent synthesise   "produce report.md from notes/ and RESEARCH_PLAN.md"
+pyharness --workspace /research-project --agent literature-review "find papers on X"
 ```
 
-Each subprocess gets its own session log, context window, and retry
-budget. They communicate via files. The orchestrator reads their
-session logs (or just their final outputs) to incorporate results.
-
-The `--agent` flag is provided for free by `coding-harness` — it
-loads `<scope>/.pyharness/agents/<name>.md` and uses that
-frontmatter to choose model + tool subset + system prompt body.
-
----
-
-## What you get for free from `coding-harness`
-
-For autoresearch specifically, what you didn't have to write:
-
-- **Session resume / fork** (pyharness-sdk) wired through
-  `CodingAgentConfig.resume_from` / `fork_from` / `fork_at_event`.
-- **Transparent compaction** with a tunable threshold via
-  `Settings.compaction_threshold_pct`.
-- **Steering queue** via `agent.start()` + `handle.steer(...)`.
-- **JSONL session log**, replayable.
-- **Extension discovery** at `<scope>/.pyharness/extensions/` so
-  *users* of your harness can add their own audit / dedup / kill
-  switches without touching your code.
-- **Named sub-agent loading** for the multi-agent subprocess
-  pattern (Step 6).
-- **AGENTS.md walking** — research project conventions get included
-  in the system prompt automatically.
-- **Skills loader** — heavyweight skills like `notebook-execute`
-  load on demand rather than padding the system prompt.
-- **The whole `pyharness.Agent` loop**.
-
-What you wrote: research-specific tools, citation extension, time
-budget extension, settings extras, system prompt, ~30-line subclass,
-~30-line CLI. Everything else is inherited.
+Or drive it programmatically from `workflows/research_loop.py`.
 
 ---
 
 ## See also
 
 - [`build-finance-harness.md`](build-finance-harness.md) — same
-  pattern, different domain. Read alongside this for the recipe.
+  pattern, different domain.
 - [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
-  — what you're inheriting; especially the `CodingAgent.__init__`
-  walkthrough.
+  — the assembly layer you're using.
 - [`packages/pyharness-sdk/README.md`](../../packages/pyharness-sdk/README.md)
   — kernel API for the tools and extensions you write.
