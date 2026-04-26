@@ -1,5 +1,11 @@
 # Building an Autoresearch Harness on pyharness
 
+> **This is an example recipe.** To understand the kernel concepts this
+> guide builds on — workspace, named agents, skills, extensions, the
+> SDK API — read [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
+> **first**. This guide *applies* those concepts to a research domain;
+> it does not re-derive them.
+
 Same mental model as the finance harness: pyharness is the engine, the
 autoresearch harness is a project directory with the right files.
 **Pyharness doesn't know it's running research — it just runs whatever

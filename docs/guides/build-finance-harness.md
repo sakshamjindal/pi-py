@@ -1,5 +1,11 @@
 # Building a Finance Harness on pyharness
 
+> **This is an example recipe.** To understand the kernel concepts this
+> guide builds on — workspace, named agents, skills, extensions, the
+> SDK API — read [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
+> **first**. This guide *applies* those concepts to a finance domain;
+> it does not re-derive them.
+
 Pyharness is the engine. The finance harness is everything you build
 around it: domain tools, AGENTS.md content, agent definitions, skills,
 extensions, orchestrators, output destinations, evals.
@@ -9,9 +15,8 @@ AGENTS.md and tools you give it.**
 
 Think of it like this: pyharness is the loop and the plumbing. The finance
 harness is the firm's investment process expressed in files that pyharness
-consumes. Pyharness stays at ~1500 lines forever. The finance harness is
-everything you build around it: tools, agents, AGENTS.md, extensions,
-orchestrators, eval, dashboard.
+consumes. The finance harness is everything you build around the kernel:
+tools, agents, AGENTS.md, extensions, orchestrators, eval, dashboard.
 
 ---
 
