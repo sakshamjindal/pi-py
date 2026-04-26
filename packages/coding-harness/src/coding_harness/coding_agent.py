@@ -58,6 +58,17 @@ BASE_SYSTEM_PROMPT = (
 )
 
 
+class NoProjectError(RuntimeError):
+    """Raised when ``CodingAgent`` is constructed without a discoverable
+    ``.pyharness/`` marker above the workspace and ``bare=False``.
+
+    Pyharness requires an explicit project boundary so personal
+    home-directory config can't silently leak into unrelated runs. Run
+    ``pyharness init`` to create one, or pass ``bare=True`` to skip
+    the project requirement entirely.
+    """
+
+
 @dataclass
 class CodingAgentConfig:
     workspace: Path
@@ -95,6 +106,16 @@ class CodingAgent:
         self.workspace_ctx = WorkspaceContext(
             workspace=config.workspace, project_root=config.project_root
         )
+        if not config.bare and self.workspace_ctx.project_root is None:
+            raise NoProjectError(
+                f"No project found.\n\n"
+                f"pyharness requires a `.pyharness/` directory at or above the workspace.\n"
+                f"None was found above:\n  {self.workspace_ctx.workspace}\n\n"
+                f"Either:\n"
+                f"  - Run `pyharness init` from your project directory to create one, or\n"
+                f"  - Use `--workspace <path>` to point inside an existing project, or\n"
+                f"  - Pass `--bare` to skip the project requirement (no AGENTS.md, settings, or extensions)."
+            )
         self.settings = config.settings or Settings.load(
             workspace=self.workspace_ctx.workspace,
             project_root=self.workspace_ctx.project_root,

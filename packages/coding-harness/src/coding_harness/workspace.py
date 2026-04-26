@@ -1,17 +1,23 @@
 """Hierarchical workspace context.
 
-One operating directory (``workspace``) with two config scopes:
+One user-facing input (``workspace``) and one derived bound
+(``project_root``) — the closest ancestor with a ``.pyharness/``
+marker, found by walking up from ``workspace`` and stopping at
+``$HOME``.
+
+Two config scopes for ``.pyharness/<thing>``:
 
 - **Personal** — ``~/.pyharness/`` (always)
-- **Project** — ``<closest ancestor with .pyharness/>/.pyharness/`` (if any)
+- **Project** — ``<project_root>/.pyharness/`` (the discovered marker)
 
-``project_root`` is just the discovered ancestor — an internal lookup
-result, not a separate user-supplied path.
+For AGENTS.md, the walk is **bounded at ``project_root``** so home-
+adjacent guidance can't leak into unrelated sessions. Personal
+``~/AGENTS.md`` still loads (deliberate global guidance), but
+intermediate ancestors *between* home and the project are not read.
 
-For AGENTS.md, every directory on the path from ``~/`` down to
-``workspace`` is scanned, picking up an ``AGENTS.md`` at any level
-(matching Claude Code's CLAUDE.md walk). General-first ordering means
-the more-specific files override the more-general ones when concatenated.
+``CodingAgent`` requires ``project_root`` to be discovered (or
+``bare=True``) — running with no marker fails fast and loud rather
+than silently using only personal config.
 """
 
 from __future__ import annotations
@@ -64,17 +70,24 @@ class WorkspaceContext:
             current = current.parent
 
     # ------------------------------------------------------------------
-    # AGENTS.md — walks every ancestor of workspace
+    # AGENTS.md — bounded walk between project_root and workspace
     # ------------------------------------------------------------------
 
     def collect_agents_md(self) -> list[tuple[Path, str]]:
-        """Collect AGENTS.md files at every directory from home down to
-        workspace, general-first.
+        """Collect AGENTS.md files, general-first.
 
-        Every ``AGENTS.md`` on the path contributes — not just the ones
-        at scope boundaries. This matches how Claude Code walks
-        ``CLAUDE.md`` and how most repo-aware tools (git, pytest)
-        compose hierarchical config.
+        Loaded:
+        - ``~/AGENTS.md`` (personal, always — deliberate global guidance)
+        - Every directory from ``project_root`` down to ``workspace``
+          (inclusive both ends)
+
+        Skipped:
+        - Any ``AGENTS.md`` *between* ``$HOME`` and ``project_root``.
+          That guidance isn't part of this project; including it would
+          be the home-config-leakage failure mode.
+
+        If ``project_root`` is ``None`` (only valid under bare mode),
+        only ``~/AGENTS.md`` and ``<workspace>/AGENTS.md`` are read.
         """
 
         results: list[tuple[Path, str]] = []
@@ -88,23 +101,29 @@ class WorkspaceContext:
         return results
 
     def _ancestor_chain(self) -> list[Path]:
-        """Directories from home down to workspace, general-first.
+        """Directories to scan for AGENTS.md, general-first.
 
-        - Always includes ``~/`` for personal AGENTS.md.
-        - Then includes every ancestor of workspace from there down.
-        - If workspace lives outside ``$HOME``, ``~/`` is still prepended.
+        Personal ``~/`` is always prepended. Then, if a project root
+        was discovered, every directory from ``project_root`` down to
+        ``workspace``. If no project root (bare mode), just the
+        workspace itself.
         """
 
         chain: list[Path] = []
-        current = self.workspace
-        while True:
-            chain.append(current)
-            if self.home is not None and current == self.home:
-                break
-            if current.parent == current:
-                break
-            current = current.parent
-        chain.reverse()
+
+        if self.project_root is not None:
+            current = self.workspace
+            while True:
+                chain.append(current)
+                if current == self.project_root:
+                    break
+                if current.parent == current:
+                    break
+                current = current.parent
+            chain.reverse()  # general-first
+        else:
+            chain.append(self.workspace)
+
         if self.home is not None and self.home not in chain:
             chain.insert(0, self.home)
         return chain

@@ -98,9 +98,14 @@ def test_collect_extensions_dirs(tmp_path):
     assert dirs[-1] == project / ".pyharness" / "extensions"
 
 
-def test_collect_agents_md_walks_every_ancestor(tmp_path):
-    """An AGENTS.md at any directory between home and workspace must be
-    picked up — not just at home, project root, and workspace."""
+def test_collect_agents_md_bounded_at_project_root(tmp_path):
+    """AGENTS.md walking is bounded between project_root and workspace.
+
+    Personal ~/AGENTS.md still loads as deliberate global guidance.
+    Files BETWEEN home and project_root (e.g. ~/work/AGENTS.md) are
+    skipped — they aren't part of this project and would constitute
+    home-directory leakage if included.
+    """
 
     home = tmp_path / "home"
     middle = home / "work"
@@ -111,15 +116,16 @@ def test_collect_agents_md_walks_every_ancestor(tmp_path):
     (project / ".pyharness").mkdir()
 
     (home / "AGENTS.md").write_text("home", encoding="utf-8")
-    (middle / "AGENTS.md").write_text("middle", encoding="utf-8")  # between home & project
+    (middle / "AGENTS.md").write_text("middle", encoding="utf-8")  # SKIPPED — above project_root
     (project / "AGENTS.md").write_text("project", encoding="utf-8")
     (src / "AGENTS.md").write_text("src", encoding="utf-8")  # between project & workspace
     (components / "AGENTS.md").write_text("components", encoding="utf-8")
 
     ctx = WorkspaceContext(workspace=components, home=home)
     contents = [c for _, c in ctx.collect_agents_md()]
-    # Every ancestor's AGENTS.md is captured, in general-first order.
-    assert contents == ["home", "middle", "project", "src", "components"]
+    # `middle` is not in the chain — it's above project_root.
+    assert contents == ["home", "project", "src", "components"]
+    assert "middle" not in contents
 
 
 def test_collect_agents_md_workspace_outside_home(tmp_path):

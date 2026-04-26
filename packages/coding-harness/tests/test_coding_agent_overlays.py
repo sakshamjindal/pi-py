@@ -1,4 +1,4 @@
-"""CodingAgent: allowlist resolution and programmatic overlays."""
+"""CodingAgent: allowlist resolution, programmatic overlays, project-required."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import pytest
 from coding_harness import (
     CodingAgent,
     CodingAgentConfig,
+    NoProjectError,
     Settings,
     SkillDefinition,
 )
@@ -199,6 +200,44 @@ def test_extra_extensions_register_fn_runs(tmp_path, monkeypatch):
         )
     )
     assert captured == ["ran"]
+
+
+def test_no_project_root_raises(tmp_path, monkeypatch):
+    """Non-bare CodingAgent without a discoverable .pyharness/ marker
+    must fail fast with NoProjectError, not silently proceed."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    workspace = tmp_path / "scratch"
+    workspace.mkdir()
+
+    with pytest.raises(NoProjectError) as excinfo:
+        CodingAgent(CodingAgentConfig(workspace=workspace, settings=Settings()))
+    msg = str(excinfo.value)
+    # Error must be actionable.
+    assert "pyharness init" in msg
+    assert "--bare" in msg
+    assert str(workspace) in msg
+
+
+def test_no_project_root_bare_mode_succeeds(tmp_path, monkeypatch):
+    """``bare=True`` skips the project requirement."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    workspace = tmp_path / "scratch"
+    workspace.mkdir()
+
+    agent = CodingAgent(
+        CodingAgentConfig(workspace=workspace, settings=Settings(), bare=True)
+    )
+    assert agent.workspace_ctx.project_root is None
+    # No extensions activated, no AGENTS.md inlined.
+    assert agent.extensions_loaded == []
 
 
 @pytest.mark.asyncio

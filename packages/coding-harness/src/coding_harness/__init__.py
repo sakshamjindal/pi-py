@@ -19,6 +19,7 @@ from .coding_agent import (
     BASE_SYSTEM_PROMPT,
     CodingAgent,
     CodingAgentConfig,
+    NoProjectError,
 )
 from .config import Settings
 from .extensions_loader import (
@@ -49,6 +50,7 @@ __all__ = [
     "LoadSkillResult",
     "LoadSkillTool",
     "LoadedExtensions",
+    "NoProjectError",
     "Settings",
     "SkillDefinition",
     "WorkspaceContext",

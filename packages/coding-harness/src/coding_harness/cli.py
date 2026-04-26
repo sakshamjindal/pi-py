@@ -18,7 +18,7 @@ from pyharness import (
     UserMessageEvent,
 )
 
-from .coding_agent import CodingAgent, CodingAgentConfig
+from .coding_agent import CodingAgent, CodingAgentConfig, NoProjectError
 from .config import Settings
 
 
@@ -60,11 +60,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
-    # The top-level `sessions` subcommand has to be detected before argparse,
-    # because the run command's positional `prompt` (nargs="*") would
-    # otherwise greedily consume it.
+    # Top-level subcommands have to be detected before argparse, because
+    # the run command's positional `prompt` (nargs="*") would otherwise
+    # greedily consume them.
     if raw and raw[0] == "sessions":
         return _handle_sessions_cli(raw[1:])
+    if raw and raw[0] == "init":
+        return _handle_init_cli(raw[1:])
 
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -111,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def _run(config: CodingAgentConfig, prompt: str, args: argparse.Namespace) -> int:
-    agent = CodingAgent(config)
+    try:
+        agent = CodingAgent(config)
+    except NoProjectError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
     if args.json:
         _attach_json_stream(agent)
     elif not args.quiet:
@@ -247,6 +253,54 @@ def _replay_session(session_id: str) -> int:
             sys.stdout.write(f"  ← {ev.tool_name} [{status}]\n")
         elif isinstance(ev, SessionEndEvent):
             sys.stdout.write(f"[end] {ev.reason}: {ev.final_message}\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# `pyharness init`
+# ---------------------------------------------------------------------------
+
+
+def _handle_init_cli(rest: list[str]) -> int:
+    sub = argparse.ArgumentParser(
+        prog="pyharness init",
+        description="Create a `.pyharness/` project marker in the current directory.",
+    )
+    sub.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="Directory to initialise (default: cwd).",
+    )
+    sub.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing settings.json. Existing subdirs are left alone.",
+    )
+    args = sub.parse_args(rest)
+
+    target = (args.path or Path.cwd()).resolve()
+    if not target.is_dir():
+        sys.stderr.write(f"error: {target} is not a directory.\n")
+        return 2
+
+    pyharness_dir = target / ".pyharness"
+    settings_file = pyharness_dir / "settings.json"
+    if settings_file.is_file() and not args.force:
+        sys.stderr.write(
+            f"`.pyharness/settings.json` already exists at {pyharness_dir}.\n"
+            f"Pass --force to overwrite.\n"
+        )
+        return 1
+
+    pyharness_dir.mkdir(exist_ok=True)
+    for sub_name in ("agents", "skills", "extensions", "tools"):
+        (pyharness_dir / sub_name).mkdir(exist_ok=True)
+    settings_file.write_text(
+        '{\n  "default_model": "claude-opus-4-7",\n  "max_turns": 100\n}\n',
+        encoding="utf-8",
+    )
+    sys.stdout.write(f"Initialised pyharness project at {pyharness_dir}\n")
     return 0
 
 

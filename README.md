@@ -29,11 +29,19 @@ ABC, and the extension surface every time.
 
 ## What's in the Box
 
-| Package | Purpose |
-|---|---|
-| **[`pyharness-sdk`](packages/pyharness-sdk/)** | The kernel — agent loop, LLM client, tool ABC, sessions, queues, events, extension runtime. **Build your own harness on this** when you need a domain-specific agent (finance, research, …). |
-| **[`coding-harness`](packages/coding-harness/)** | A reference harness built on the kernel: file conventions (`.pyharness/`, `AGENTS.md`), settings hierarchy, named sub-agents, skills, opt-in extensions, eight built-in tools, plugin entry points, the `pyharness` CLI. **Use this when you want pyharness as a ready-to-run coding agent**, or as the assembly layer for a domain harness. |
-| **[`tui`](packages/tui/)** | Minimal stdlib REPL for dogfooding the coding harness. |
+```
+packages/
+  pyharness-sdk/   The kernel. Agent loop, LLM client, tool ABC,
+                   sessions, queues, events, extension runtime.
+                   Build your own harness on this.
+
+  coding-harness/  Reference harness on top of the kernel. File
+                   conventions, settings hierarchy, named agents,
+                   skills, opt-in extensions, eight built-in tools,
+                   plugin entry points, the `pyharness` CLI.
+
+  tui/             Stdlib REPL for dogfooding the coding harness.
+```
 
 > **For most users, [`coding-harness`](packages/coding-harness/) is
 > the entry point.** The SDK is for when you're building a *new*
@@ -54,6 +62,10 @@ pip install -e packages/pyharness-sdk \
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.
 
+# In your project directory, drop a `.pyharness/` marker
+cd ~/work/my-project
+pyharness init
+
 # Bundled coding agent
 pyharness "fix the failing tests"
 
@@ -61,9 +73,15 @@ pyharness "fix the failing tests"
 pyharness-tui
 ```
 
-That's enough to use the coding harness today. For flags, settings,
-named agents, skills, extensions, and the SDK API, see
-[`packages/coding-harness/README.md`](packages/coding-harness/README.md).
+`pyharness init` creates `.pyharness/` in the current directory with
+a starter `settings.json`. The marker is required — pyharness walks
+up from the workspace looking for it and refuses to run if none is
+found, so home-directory config can't accidentally leak into
+unrelated sessions. Use `--bare` to bypass the requirement for
+one-off runs.
+
+For flags, settings, named agents, skills, extensions, and the SDK
+API, see [`packages/coding-harness/README.md`](packages/coding-harness/README.md).
 
 ---
 

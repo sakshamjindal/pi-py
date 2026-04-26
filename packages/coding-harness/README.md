@@ -53,14 +53,29 @@ pip install -e packages/pyharness-sdk -e packages/coding-harness
 
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.
 
+cd ~/work/my-project
+pyharness init                        # drop a `.pyharness/` marker
 pyharness "fix the failing tests"
 ```
 
-That's enough to use the bundled coding agent. With no `.pyharness/`
-anywhere up the tree, the agent runs with the eight built-in tools and
-no extensions activated. Add capabilities incrementally via
-[skills](#skills), [extensions](#extensions), [named agents](#named-agents),
-or pip-installed [plugins](#plugins).
+`pyharness init` creates `.pyharness/` in the current directory with
+a starter `settings.json` and empty `agents/`, `skills/`,
+`extensions/`, `tools/` subdirectories. The marker is **required**:
+running `pyharness "task"` walks up from the workspace looking for
+it and refuses to run if none is found. This stops home-directory
+config from leaking into unrelated sessions.
+
+To bypass the requirement for one-off runs:
+
+```bash
+pyharness --bare "task"
+```
+
+`--bare` skips AGENTS.md, settings, and extensions entirely.
+
+Add capabilities incrementally via [skills](#skills),
+[extensions](#extensions), [named agents](#named-agents), or
+pip-installed [plugins](#plugins).
 
 ---
 
@@ -114,9 +129,18 @@ tools resolve relative paths against it.
 > process-global and races between async tasks. `workspace=` is the
 > only safe way to isolate file work.
 
-The **project root** is the closest ancestor of the workspace that
-contains a `.pyharness/` directory. Discovered automatically by
-walking up from the workspace and stopping at `$HOME`.
+The **project root** is the closest ancestor of the workspace
+containing a `.pyharness/` directory. It's a derived value, not a
+separate input — pyharness walks up from `workspace` looking for
+the marker and stops at `$HOME`.
+
+**The project marker is required.** A `CodingAgent` constructed with
+no `.pyharness/` discoverable above its workspace raises
+`NoProjectError` immediately. Use `pyharness init` to create one, or
+pass `bare=True` (CLI: `--bare`) to skip the project requirement.
+
+This deliberate boundary stops home-directory config from leaking
+into unrelated sessions — Claude Code's well-known failure mode.
 
 **Two config scopes** for `.pyharness/<thing>` (settings, agents,
 skills, tools, extensions):
@@ -124,7 +148,7 @@ skills, tools, extensions):
 | Scope | Path |
 |---|---|
 | Personal | `~/.pyharness/` (always) |
-| Project | `<project_root>/.pyharness/` (if discovered) |
+| Project | `<project_root>/.pyharness/` (the discovered marker) |
 
 Most-general-first: project entries override personal on name
 collision. There is **no** third "workspace" scope — if you want
@@ -133,21 +157,23 @@ becomes the project root automatically.
 
 ### AGENTS.md
 
-Every directory on the path from `~/` down to the workspace is
-scanned for an `AGENTS.md`. Matches how Claude Code walks
-`CLAUDE.md`. Nested guidance composes naturally:
+`AGENTS.md` is read from `~/AGENTS.md` (personal) plus every
+directory between project root and workspace, inclusive. The walk is
+**bounded at project root** so guidance from above the marker can't
+leak into unrelated sessions.
 
 ```
 ~/AGENTS.md                            # personal (always)
-~/work/AGENTS.md                       # parent-of-projects guidance
-~/work/repo/AGENTS.md                  # repo-level (project root)
+~/work/AGENTS.md                       # SKIPPED (above project root)
+~/work/repo/AGENTS.md                  # project root
 ~/work/repo/src/AGENTS.md              # subdirectory rules
-~/work/repo/src/components/AGENTS.md   # subpackage rules
+~/work/repo/src/components/AGENTS.md   # subpackage rules (workspace)
 ```
 
-If your workspace is `~/work/repo/src/components/`, all five files
-are concatenated in general-first order so the most-specific ones
-appear last and override.
+If your workspace is `~/work/repo/src/components/`, four files are
+concatenated in general-first order so the most-specific ones appear
+last and override. `~/work/AGENTS.md` is not read because it's above
+the project marker.
 
 Lines starting with `@<path>` are **deferred imports** — not inlined:
 
@@ -386,8 +412,11 @@ from pathlib import Path
 from coding_harness import CodingAgent, CodingAgentConfig
 
 async def main() -> None:
+    # Workspace must be inside a project tree (a directory with
+    # `.pyharness/` somewhere at or above it). Use `bare=True` for
+    # ad-hoc runs without a project.
     agent = CodingAgent(CodingAgentConfig(
-        workspace=Path("/tmp/scratch"),
+        workspace=Path("~/work/my-project").expanduser(),
         model="claude-opus-4-7",
     ))
     result = await agent.run("create hello.txt with the word 'hi'")
@@ -581,6 +610,14 @@ explicit refusals list.
 | `pyharness sessions ls` | List recent sessions |
 | `pyharness sessions show <id>` | Print session JSONL |
 | `pyharness sessions replay <id>` | Pretty-print session events |
+
+### Project
+
+| Command | Description |
+|---|---|
+| `pyharness init` | Create `.pyharness/` in the current directory with a starter `settings.json` and empty `agents/`, `skills/`, `extensions/`, `tools/` subdirectories |
+| `pyharness init --path <dir>` | Initialise at the given directory instead of cwd |
+| `pyharness init --force` | Overwrite an existing `settings.json` |
 
 ### Examples
 
