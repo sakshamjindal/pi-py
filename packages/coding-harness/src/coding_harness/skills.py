@@ -41,8 +41,9 @@ def discover_skills(workspace: WorkspaceContext) -> dict[str, SkillDefinition]:
     override earlier ones by name.
     """
 
-    import frontmatter
     import importlib.metadata
+
+    import frontmatter
 
     found: dict[str, SkillDefinition] = {}
     for d in workspace.collect_skills_dirs():

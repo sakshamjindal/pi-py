@@ -89,9 +89,7 @@ def test_named_agent_extensions_frontmatter_activates(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    agent = CodingAgent(
-        _basic_config(workspace, project_root=home / "p", agent_name="ra")
-    )
+    agent = CodingAgent(_basic_config(workspace, project_root=home / "p", agent_name="ra"))
     assert "always_on" in agent.extensions_loaded
 
 
@@ -142,9 +140,7 @@ def test_skills_allowlist_filters_visible_skills(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    agent = CodingAgent(
-        _basic_config(workspace, project_root=home / "p", agent_name="narrow")
-    )
+    agent = CodingAgent(_basic_config(workspace, project_root=home / "p", agent_name="narrow"))
     assert "alpha" in agent.skills
     assert "beta" not in agent.skills
 
@@ -177,9 +173,7 @@ def test_skills_wildcard_means_all(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    agent = CodingAgent(
-        _basic_config(workspace, project_root=home / "p", agent_name="wide")
-    )
+    agent = CodingAgent(_basic_config(workspace, project_root=home / "p", agent_name="wide"))
     assert "alpha" in agent.skills and "beta" in agent.skills
 
 
@@ -232,9 +226,7 @@ def test_no_project_root_bare_mode_succeeds(tmp_path, monkeypatch):
     workspace = tmp_path / "scratch"
     workspace.mkdir()
 
-    agent = CodingAgent(
-        CodingAgentConfig(workspace=workspace, settings=Settings(), bare=True)
-    )
+    agent = CodingAgent(CodingAgentConfig(workspace=workspace, settings=Settings(), bare=True))
     assert agent.workspace_ctx.project_root is None
     # No extensions activated, no AGENTS.md inlined.
     assert agent.extensions_loaded == []
@@ -275,9 +267,7 @@ async def test_named_agent_allowlist_blocks_mid_run_skill(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    agent = CodingAgent(
-        _basic_config(workspace, project_root=home / "p", agent_name="narrow")
-    )
+    agent = CodingAgent(_basic_config(workspace, project_root=home / "p", agent_name="narrow"))
 
     # Drop a new skill mid-run — outside the allowlist.
     (skills_dir / "beta").mkdir(parents=True)
@@ -325,9 +315,7 @@ async def test_named_agent_tools_frontmatter_keeps_builtins(tmp_path, monkeypatc
         encoding="utf-8",
     )
 
-    agent = CodingAgent(
-        _basic_config(workspace, project_root=home / "p", agent_name="minimal")
-    )
+    agent = CodingAgent(_basic_config(workspace, project_root=home / "p", agent_name="minimal"))
     # All builtins must be present even though only `read` is listed.
     for name in ("read", "write", "edit", "bash", "grep", "glob"):
         assert agent.tool_registry.has(name), f"missing builtin {name}"

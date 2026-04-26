@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import textwrap
+from pathlib import Path
 
 from coding_harness import WorkspaceContext
 

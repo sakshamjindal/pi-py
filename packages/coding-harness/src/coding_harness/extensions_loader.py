@@ -164,8 +164,7 @@ def load_extensions(
         ref = available.refs.get(name)
         if ref is None:
             sys.stderr.write(
-                f"[extension] {name!r} requested but not found. "
-                f"Known: {available.names()}\n"
+                f"[extension] {name!r} requested but not found. Known: {available.names()}\n"
             )
             continue
         register = _resolve_register(ref, name)

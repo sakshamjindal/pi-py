@@ -36,9 +36,7 @@ async def run_one(base: Path, idx: int, prompt: str) -> str:
 
 
 async def fanout(base: Path, prompts: list[str]) -> list[str]:
-    return await asyncio.gather(
-        *(run_one(base, i, p) for i, p in enumerate(prompts))
-    )
+    return await asyncio.gather(*(run_one(base, i, p) for i, p in enumerate(prompts)))
 
 
 def reduce_outputs(results: list[str]) -> str:
