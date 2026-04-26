@@ -5,11 +5,46 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pi-py"
 version = "0.1.0"
-description = "pi-py workspace: an embeddable Python agent harness primitive (pyharness-sdk) plus a reference coding harness (coding-harness) and a stdlib REPL (pyharness-tui)."
+description = "Headless Python agent harness for Claude / LLM coding agents — pluggable skills (SKILL.md), AGENTS.md, opt-in extensions, plugin entry points. Inspired by pi-mono."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "pi-py contributors" }]
+keywords = [
+    "agent",
+    "agents",
+    "ai-agent",
+    "ai-agents",
+    "llm",
+    "llm-agent",
+    "coding-agent",
+    "claude",
+    "claude-code",
+    "anthropic",
+    "agent-framework",
+    "agent-sdk",
+    "agentic",
+    "agentic-ai",
+    "litellm",
+    "tool-use",
+    "function-calling",
+    "skills",
+    "skills-md",
+    "agents-md",
+    "headless-agent",
+    "pi-mono",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 [project.optional-dependencies]
 dev = [

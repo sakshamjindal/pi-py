@@ -5,11 +5,32 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyharness-tui"
 version = "0.1.0"
-description = "Minimal interactive REPL for dogfooding the coding-harness agent. Stdlib-only; passive subscriber to the event bus."
+description = "Minimal stdlib REPL for the pi-py coding agent — interactive shell over the coding-harness event bus."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "pi-py contributors" }]
+keywords = [
+    "agent",
+    "llm-agent",
+    "coding-agent",
+    "claude",
+    "anthropic",
+    "repl",
+    "tui",
+    "agent-cli",
+    "pi-mono",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Environment :: Console",
+]
 dependencies = [
     "pyharness",
     "coding-harness",

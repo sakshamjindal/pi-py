@@ -5,11 +5,43 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "coding-harness"
 version = "0.1.0"
-description = "Coding-agent scaffolding on top of the pyharness SDK: built-in tools, AGENTS.md, settings, skills, named agents, extensions, CLI. One concrete harness built on the pi-py kernel."
+description = "Reference Python coding agent on the pyharness SDK — AGENTS.md, SKILL.md plugins, opt-in extensions, named sub-agents, eight built-in tools, the `pyharness` CLI."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "pi-py contributors" }]
+keywords = [
+    "agent",
+    "ai-agent",
+    "llm-agent",
+    "coding-agent",
+    "claude",
+    "claude-code",
+    "anthropic",
+    "agent-framework",
+    "agent-sdk",
+    "agentic",
+    "litellm",
+    "tool-use",
+    "skills",
+    "skills-md",
+    "agents-md",
+    "headless-agent",
+    "pi-mono",
+    "claude-code-alternative",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
+]
 dependencies = [
     "pyharness",
     "pyyaml>=6.0",
