@@ -8,7 +8,7 @@ in the ``harness`` package.
 
 from __future__ import annotations
 
-from .compaction import Compactor, CompactionResult
+from .compaction import CompactionResult, Compactor
 from .events import (
     AgentEvent,
     AssistantMessageEvent,
@@ -61,9 +61,9 @@ __all__ = [
     "AgentHandle",
     "AgentOptions",
     "AssistantMessageEvent",
-    "Compactor",
     "CompactionEvent",
     "CompactionResult",
+    "Compactor",
     "EventBus",
     "ExtensionAPI",
     "FollowUpMessageEvent",

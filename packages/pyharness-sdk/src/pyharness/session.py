@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -10,7 +11,6 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from .events import (
     AgentEvent,
@@ -31,7 +31,9 @@ def _cwd_hash(cwd: Path) -> str:
 
 
 def _default_session_dir() -> Path:
-    return Path(os.environ.get("PYHARNESS_SESSION_DIR", str(Path.home() / ".pyharness" / "sessions")))
+    return Path(
+        os.environ.get("PYHARNESS_SESSION_DIR", str(Path.home() / ".pyharness" / "sessions"))
+    )
 
 
 @dataclass
@@ -79,7 +81,7 @@ class Session:
     # ------------------------------------------------------------------
 
     @classmethod
-    def new(cls, cwd: Path, *, base_dir: Path | None = None) -> "Session":
+    def new(cls, cwd: Path, *, base_dir: Path | None = None) -> Session:
         cwd = Path(cwd).resolve()
         base = (base_dir or _default_session_dir()).expanduser()
         dir_ = base / _cwd_hash(cwd)
@@ -89,7 +91,7 @@ class Session:
         return cls(session_id=sid, cwd=cwd, log_path=log)
 
     @classmethod
-    def resume(cls, session_id: str, *, base_dir: Path | None = None) -> "Session":
+    def resume(cls, session_id: str, *, base_dir: Path | None = None) -> Session:
         path = cls.find_log(session_id, base_dir=base_dir)
         if path is None:
             raise FileNotFoundError(f"No session log found for {session_id}")
@@ -103,16 +105,17 @@ class Session:
         *,
         fork_at_event: int | None = None,
         base_dir: Path | None = None,
-    ) -> "Session":
+    ) -> Session:
         src_path = cls.find_log(source_session_id, base_dir=base_dir)
         if src_path is None:
             raise FileNotFoundError(f"No session log found for {source_session_id}")
         cwd = cls._cwd_from_log(src_path)
         new = cls.new(cwd, base_dir=base_dir)
 
-        with src_path.open("r", encoding="utf-8") as src_fh, new.log_path.open(
-            "w", encoding="utf-8"
-        ) as dst_fh:
+        with (
+            src_path.open("r", encoding="utf-8") as src_fh,
+            new.log_path.open("w", encoding="utf-8") as dst_fh,
+        ):
             for line in src_fh:
                 line = line.strip()
                 if not line:
@@ -143,10 +146,8 @@ class Session:
             with self.log_path.open("a", encoding="utf-8") as fh:
                 fh.write(data + "\n")
                 fh.flush()
-                try:
+                with contextlib.suppress(OSError):
                     os.fsync(fh.fileno())
-                except OSError:
-                    pass
             return event
 
     def read_events(self) -> list[AgentEvent]:

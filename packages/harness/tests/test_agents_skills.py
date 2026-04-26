@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from pyharness import ToolContext, ToolRegistry
 from harness import (
     LoadSkillTool,
     WorkspaceContext,
@@ -17,6 +16,7 @@ from harness import (
     load_agent_definition,
     resolve_tool_list,
 )
+from pyharness import ToolContext, ToolRegistry
 
 
 def _setup_project(tmp_path: Path) -> tuple[Path, Path]:
@@ -29,7 +29,7 @@ def _setup_project(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_load_agent_definition(tmp_path):
-    home, workspace = _setup_project(tmp_path)
+    home, _workspace = _setup_project(tmp_path)
     agents_dir = home / "p" / ".pyharness" / "agents"
     agents_dir.mkdir(parents=True)
     md = agents_dir / "ra.md"
@@ -124,6 +124,8 @@ async def test_load_skill_injects_instructions(tmp_path):
     skills = discover_skills(ctx)
     reg = ToolRegistry()
     tool = LoadSkillTool(skills, reg)
-    res = await tool.execute(tool.args_schema(name="demo"), ToolContext(workspace=workspace, session_id="s", run_id="r"))
+    res = await tool.execute(
+        tool.args_schema(name="demo"), ToolContext(workspace=workspace, session_id="s", run_id="r")
+    )
     assert res.loaded
     assert "DO_THE_THING" in res.instructions

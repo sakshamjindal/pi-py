@@ -44,7 +44,10 @@ async def _fake_acompletion_text(**kwargs):
     async def gen():
         yield _FakeChunk([_FakeChoice(_FakeDelta(content="Hello "))])
         yield _FakeChunk([_FakeChoice(_FakeDelta(content="world"))])
-        yield _FakeChunk([_FakeChoice(_FakeDelta(content=None), finish_reason="stop")], usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7})
+        yield _FakeChunk(
+            [_FakeChoice(_FakeDelta(content=None), finish_reason="stop")],
+            usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+        )
 
     return gen()
 
@@ -63,18 +66,14 @@ async def _fake_acompletion_tool(**kwargs):
         yield _FakeChunk(
             [
                 _FakeChoice(
-                    _FakeDelta(
-                        tool_calls=[_FakeToolCall(idx=0, tcid="call_1", args='{"path":')]
-                    )
+                    _FakeDelta(tool_calls=[_FakeToolCall(idx=0, tcid="call_1", args='{"path":')])
                 )
             ]
         )
         yield _FakeChunk(
             [
                 _FakeChoice(
-                    _FakeDelta(
-                        tool_calls=[_FakeToolCall(idx=0, tcid="call_1", args='"a.txt"}')]
-                    ),
+                    _FakeDelta(tool_calls=[_FakeToolCall(idx=0, tcid="call_1", args='"a.txt"}')]),
                     finish_reason="tool_calls",
                 )
             ],

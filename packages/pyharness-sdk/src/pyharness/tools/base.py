@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import tempfile
 import uuid
 from abc import ABC, abstractmethod
@@ -174,7 +173,7 @@ async def execute_tool(
             error="tool_error",
             duration_ms=(asyncio.get_event_loop().time() - started) * 1000,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ToolExecutionResult(
             ok=False,
             content=f"Tool {tool.name} timed out after {timeout_seconds}s",

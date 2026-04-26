@@ -48,7 +48,6 @@ from .session import Session
 from .tools.base import Tool, ToolContext, ToolRegistry, execute_tool
 from .types import Message, RunResult
 
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -232,7 +231,9 @@ class Agent:
                 tool: Tool | None = self.tool_registry.get(tc.name)
                 if tool is None:
                     err = f"Unknown tool: {tc.name}"
-                    await self._record_tool_end(tc.id, tc.name, ok=False, content=err, error="unknown_tool")
+                    await self._record_tool_end(
+                        tc.id, tc.name, ok=False, content=err, error="unknown_tool"
+                    )
                     messages.append(
                         Message(role="tool", tool_call_id=tc.id, name=tc.name, content=err)
                     )
@@ -244,14 +245,20 @@ class Agent:
                 )
                 if hook_outcome.result is HookResult.Deny:
                     msg = f"Denied by extension: {hook_outcome.reason or 'no reason given'}"
-                    await self._record_tool_end(tc.id, tc.name, ok=False, content=msg, error="denied")
+                    await self._record_tool_end(
+                        tc.id, tc.name, ok=False, content=msg, error="denied"
+                    )
                     messages.append(
                         Message(role="tool", tool_call_id=tc.id, name=tc.name, content=msg)
                     )
                     continue
                 if hook_outcome.result is HookResult.Replace:
                     replacement = hook_outcome.replacement_value
-                    text = replacement if isinstance(replacement, str) else json.dumps(replacement, default=str)
+                    text = (
+                        replacement
+                        if isinstance(replacement, str)
+                        else json.dumps(replacement, default=str)
+                    )
                     await self._record_tool_end(tc.id, tc.name, ok=True, content=text)
                     messages.append(
                         Message(role="tool", tool_call_id=tc.id, name=tc.name, content=text)
@@ -396,7 +403,9 @@ class Agent:
         )
         return result.messages
 
-    async def _record_tool_end(self, call_id: str, name: str, *, ok: bool, content: str, error: str | None = None) -> None:
+    async def _record_tool_end(
+        self, call_id: str, name: str, *, ok: bool, content: str, error: str | None = None
+    ) -> None:
         await self.session.append_event(
             ToolCallEndEvent(
                 session_id=self.session.session_id,
@@ -420,7 +429,9 @@ class Agent:
                 settings_snapshot=self.options.settings_snapshot,
             )
         )
-        await self._emit_lifecycle("session_start", {"prompt": initial_prompt, "model": self.options.model})
+        await self._emit_lifecycle(
+            "session_start", {"prompt": initial_prompt, "model": self.options.model}
+        )
 
     async def _emit_lifecycle(self, name: str, payload: dict[str, Any]) -> HookOutcome:
         ctx = HandlerContext(

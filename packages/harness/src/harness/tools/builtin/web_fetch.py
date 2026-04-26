@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from pydantic import BaseModel, Field
@@ -54,7 +54,7 @@ class WebFetchTool(Tool):
             f"url: {args.url}\n"
             f"status: {resp.status_code}\n"
             f"content_type: {ctype}\n"
-            f"fetched_at: {datetime.now(timezone.utc).isoformat()}\n"
+            f"fetched_at: {datetime.now(UTC).isoformat()}\n"
             f"--- body ---\n"
         )
         return meta + body

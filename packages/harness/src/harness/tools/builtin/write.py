@@ -27,7 +27,9 @@ class WriteTool(Tool):
             p.write_text(args.content, encoding="utf-8")
         except OSError as exc:
             raise ToolError(f"Failed to write {p}: {exc}") from exc
-        line_count = args.content.count("\n") + (0 if args.content.endswith("\n") or not args.content else 1)
+        line_count = args.content.count("\n") + (
+            0 if args.content.endswith("\n") or not args.content else 1
+        )
         # Record in extras so the harness can list files_written.
         written = ctx.extras.setdefault("files_written", [])
         if str(p) not in written:

@@ -10,6 +10,7 @@ and the API contract that extensions code against.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 import inspect
 import sys
@@ -37,19 +38,19 @@ class HookOutcome:
     replacement_value: Any = None
 
     @classmethod
-    def cont(cls) -> "HookOutcome":
+    def cont(cls) -> HookOutcome:
         return cls(result=HookResult.Continue)
 
     @classmethod
-    def deny(cls, reason: str) -> "HookOutcome":
+    def deny(cls, reason: str) -> HookOutcome:
         return cls(result=HookResult.Deny, reason=reason)
 
     @classmethod
-    def modify(cls, new_event: LifecycleEvent) -> "HookOutcome":
+    def modify(cls, new_event: LifecycleEvent) -> HookOutcome:
         return cls(result=HookResult.Modify, new_event=new_event)
 
     @classmethod
-    def replace(cls, value: Any) -> "HookOutcome":
+    def replace(cls, value: Any) -> HookOutcome:
         return cls(result=HookResult.Replace, replacement_value=value)
 
 
@@ -73,9 +74,7 @@ class EventBus:
     def subscribe(self, event_name: str, handler: HookHandler) -> None:
         self._handlers.setdefault(event_name, []).append(handler)
 
-    async def emit(
-        self, event: LifecycleEvent, ctx: HandlerContext
-    ) -> HookOutcome:
+    async def emit(self, event: LifecycleEvent, ctx: HandlerContext) -> HookOutcome:
         """Dispatch the event. Returns the first non-Continue outcome, or
         Continue if every handler is a no-op."""
 
@@ -87,9 +86,7 @@ class EventBus:
                     result = await result
             except Exception as exc:
                 # Extensions never crash the harness — log and continue.
-                sys.stderr.write(
-                    f"[extension] handler for {event.name} raised: {exc}\n"
-                )
+                sys.stderr.write(f"[extension] handler for {event.name} raised: {exc}\n")
                 continue
             if result is None:
                 continue
@@ -133,10 +130,8 @@ class ExtensionAPI:
     def append_session_entry(self, entry: dict[str, Any]) -> None:
         if self._session_appender is None:
             return
-        try:
+        with contextlib.suppress(RuntimeError):
             asyncio.get_event_loop().create_task(self._session_appender(entry))
-        except RuntimeError:
-            pass
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         if self._settings is None:

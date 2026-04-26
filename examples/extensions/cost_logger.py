@@ -17,7 +17,6 @@ from pathlib import Path
 
 from pyharness import ExtensionAPI, HookOutcome
 
-
 _COST_FILE_NAME = "cost.jsonl"
 
 

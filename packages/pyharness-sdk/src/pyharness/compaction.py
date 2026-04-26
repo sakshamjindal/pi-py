@@ -48,7 +48,9 @@ class Compactor:
     ) -> CompactionResult:
         before = count_tokens(model_for_count, messages)
         if before <= threshold_tokens or len(messages) <= self.keep_recent_count + 1:
-            return CompactionResult(messages=messages, tokens_before=before, tokens_after=before, compacted=False)
+            return CompactionResult(
+                messages=messages, tokens_before=before, tokens_after=before, compacted=False
+            )
 
         # Find the leading system message (if any) to keep verbatim.
         head: list[Message] = []
@@ -58,11 +60,17 @@ class Compactor:
             body_start = 1
 
         tail_count = max(1, self.keep_recent_count)
-        tail = messages[-tail_count:] if tail_count < len(messages) - body_start else messages[body_start:]
+        tail = (
+            messages[-tail_count:]
+            if tail_count < len(messages) - body_start
+            else messages[body_start:]
+        )
         middle = messages[body_start:-tail_count] if tail_count < len(messages) - body_start else []
 
         if not middle:
-            return CompactionResult(messages=messages, tokens_before=before, tokens_after=before, compacted=False)
+            return CompactionResult(
+                messages=messages, tokens_before=before, tokens_after=before, compacted=False
+            )
 
         summary = await self._summarise(middle)
         synthetic = Message(
@@ -73,7 +81,7 @@ class Compactor:
                 f"{summary}"
             ),
         )
-        new_messages = head + [synthetic] + list(tail)
+        new_messages = [*head, synthetic, *list(tail)]
         after = count_tokens(model_for_count, new_messages)
         return CompactionResult(
             messages=new_messages,
@@ -107,8 +115,7 @@ class Compactor:
             "tool results that affect future steps, file paths touched, and "
             "any open questions. Drop verbose tool output that no longer "
             "matters. Output a single compact summary, no preamble.\n\n"
-            "----- transcript -----\n"
-            + "\n\n".join(rendered)
+            "----- transcript -----\n" + "\n\n".join(rendered)
         )
         msgs = [Message(role="user", content=prompt)]
         resp = await self.llm.complete(model=self.summarization_model, messages=msgs)

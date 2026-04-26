@@ -40,7 +40,6 @@ from .skills import LoadSkillTool, SkillDefinition, build_skill_index, discover_
 from .tools.builtin import builtin_registry
 from .workspace import WorkspaceContext
 
-
 BASE_SYSTEM_PROMPT = (
     "You are pyharness, an LLM-driven agent running in a headless harness.\n"
     "You receive a task and complete it by calling the tools available to "
@@ -123,9 +122,7 @@ class CodingAgent:
         if self.config.resume_from:
             return Session.resume(self.config.resume_from)
         if self.config.fork_from:
-            return Session.fork(
-                self.config.fork_from, fork_at_event=self.config.fork_at_event
-            )
+            return Session.fork(self.config.fork_from, fork_at_event=self.config.fork_at_event)
         return Session.new(self.workspace_ctx.workspace)
 
     def _setup(self) -> None:
@@ -153,8 +150,7 @@ class CodingAgent:
             agents = discover_agents(self.workspace_ctx)
             if self.config.agent_name not in agents:
                 raise ValueError(
-                    f"Unknown agent: {self.config.agent_name!r}. Known: "
-                    f"{sorted(agents.keys())}"
+                    f"Unknown agent: {self.config.agent_name!r}. Known: {sorted(agents.keys())}"
                 )
             self.agent_def = load_agent_definition(agents[self.config.agent_name])
             if self.agent_def.model and not self.config.model:
