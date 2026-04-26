@@ -1,5 +1,15 @@
 # Plugins: skills and extensions from Python packages
 
+> **Prerequisite reading.** This guide assumes you understand pyharness's
+> skill and extension model from the kernel manual. Read
+> [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
+> first — specifically the
+> [Skills](../../packages/coding-harness/README.md#skills),
+> [Extensions](../../packages/coding-harness/README.md#extensions), and
+> [Plugins](../../packages/coding-harness/README.md#plugins) sections —
+> before this guide. This guide is the *publishing* recipe; that doc is
+> the *concepts*.
+
 Pyharness loads skills and extensions from two sources:
 
 1. **Filesystem scopes** — `~/.pyharness/`, `<project>/.pyharness/`,

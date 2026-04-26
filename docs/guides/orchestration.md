@@ -1,5 +1,13 @@
 # Orchestration patterns
 
+> **Prerequisite reading.** This guide assumes you've read
+> [`packages/coding-harness/README.md`](../../packages/coding-harness/README.md)
+> — specifically [Programmatic Use (SDK)](../../packages/coding-harness/README.md#programmatic-use-sdk)
+> for `CodingAgent` / `CodingAgentConfig` and
+> [Workspace and config scopes](../../packages/coding-harness/README.md#workspace-and-config-scopes)
+> for the per-agent workspace model. This guide composes those
+> primitives; it doesn't introduce them.
+
 `coding-harness` deliberately ships **no** `Pipeline`, `FanOut`, or
 DAG framework. Orchestration patterns are domain-shaped: a research
 pipeline wants different sequencing than a code-review fan-out, and

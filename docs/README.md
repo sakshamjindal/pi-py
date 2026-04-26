@@ -2,25 +2,35 @@
 
 Long-form material that doesn't fit in package READMEs.
 
-## Guides
+> **Read order matters.** Before any guide in this directory, read
+> **[`packages/coding-harness/README.md`](../packages/coding-harness/README.md)**.
+> That's the canonical user manual — kernel concepts (workspace, named
+> agents, skills, extensions, plugins, the SDK API). The guides below
+> *apply* those concepts; they don't re-derive them.
 
-| Guide | What |
-|---|---|
-| [Building a finance harness](guides/build-finance-harness.md) | End-to-end recipe for a domain harness. 30–50 tools, 5 named agents, orchestrated morning routine, eval suite, feedback loop. |
-| [Building an autoresearch harness](guides/build-autoresearch-harness.md) | Same recipe applied to long-horizon research. Disk-as-truth for notes and plan files, citation auditing, time budgets, multi-agent via subprocesses. |
-| [Plugins](guides/plugins.md) | Publish skills and extensions from a pip-installed library via Python entry points (`pyharness.skills`, `pyharness.extensions`). Namespacing, lazy imports, activation rules, trust model. |
-| [Orchestration](guides/orchestration.md) | Sequential pipelines, fan-out, supervisor / specialist via subprocess. Plain Python recipes, not a framework. |
-
-Both build guides are recipes. Read them alongside
-[`packages/coding-harness/`](../packages/coding-harness/) — the
-in-tree worked example whose source you can read as the reference
-implementation.
-
-## Reference
+## Reference (read these first)
 
 | Doc | What |
 |---|---|
-| [`DESIGN.md`](../DESIGN.md) | Design principles, the explicit refusals list, architecture overview |
-| [`packages/coding-harness/README.md`](../packages/coding-harness/README.md) | What `pyharness "task"` actually does, file conventions, every CLI flag, SDK API |
+| **[`packages/coding-harness/README.md`](../packages/coding-harness/README.md)** ← **start here** | What `pyharness "task"` actually does. File conventions, every CLI flag, SDK API. The canonical user doc. |
 | [`packages/pyharness-sdk/README.md`](../packages/pyharness-sdk/README.md) | Kernel API, the loop diagram, lifecycle events |
+| [`DESIGN.md`](../DESIGN.md) | Design principles + explicit refusals list. Philosophy. |
 | [`packages/tui/README.md`](../packages/tui/README.md) | The minimal REPL |
+
+## Guides (example recipes — read kernel manual first)
+
+These are **example applications** of the kernel concepts. They show
+you how to *use* pi-py to build something concrete. They are not
+substitutes for the coding-harness README.
+
+| Guide | What | Prerequisite |
+|---|---|---|
+| [Plugins](guides/plugins.md) | Publishing skills & extensions from a pip-installed library via Python entry points | [coding-harness Skills + Extensions + Plugins sections](../packages/coding-harness/README.md#skills) |
+| [Orchestration](guides/orchestration.md) | Sequential pipelines, fan-out, supervisor / specialist via subprocess | [coding-harness Programmatic Use](../packages/coding-harness/README.md#programmatic-use-sdk) |
+| [Building a finance harness](guides/build-finance-harness.md) | End-to-end domain-harness recipe applied to trading / portfolio analysis | All of the above |
+| [Building an autoresearch harness](guides/build-autoresearch-harness.md) | Same recipe applied to long-horizon research | All of the above |
+
+The build-* guides are the largest worked examples — full project
+directories with 30+ tools, named agents, eval suites. They are *not*
+where to learn the kernel; they are where to see the kernel applied at
+scale.
