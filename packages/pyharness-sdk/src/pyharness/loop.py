@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -381,9 +382,17 @@ class Agent:
             return messages
         threshold = int(self.options.model_context_window * self.options.compaction_threshold_pct)
         await self._emit_lifecycle("compaction_start", {})
-        result = await self.compactor.maybe_compact(
-            messages, threshold, model_for_count=self.options.model
-        )
+        try:
+            result = await self.compactor.maybe_compact(
+                messages, threshold, model_for_count=self.options.model
+            )
+        except Exception as exc:
+            sys.stderr.write(f"[compaction] failed: {exc}; continuing without compaction\n")
+            await self._emit_lifecycle(
+                "compaction_end",
+                {"compacted": False, "error": str(exc)},
+            )
+            return messages
         if result.compacted:
             await self.session.append_event(
                 CompactionEvent(
