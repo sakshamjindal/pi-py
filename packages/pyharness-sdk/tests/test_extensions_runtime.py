@@ -1,7 +1,8 @@
 """Extension runtime: event bus, hooks, denial, replacement.
 
-The file-discovery loader (`load_extensions`) lives in the harness
-package and is exercised in ``packages/harness/tests/test_extensions_loader.py``.
+The file-discovery loader (`load_extensions`) lives in the
+coding-harness package and is exercised in
+``packages/coding-harness/tests/test_extensions_loader.py``.
 """
 
 from __future__ import annotations

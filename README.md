@@ -65,10 +65,11 @@ named agents, skills, and extensions, see
 ### Build your own harness on `pyharness-sdk`
 
 The SDK gives you the loop and primitives; everything else is your
-choice. Sketch for a finance harness:
+choice. The recipe in four steps:
 
-1. Define the tools your agent needs (price lookups, position
-   queries, order placement) as `Tool` subclasses with Pydantic args.
+1. Define the tools your agent needs (e.g. for finance: price
+   lookups, position queries, order placement) as `Tool` subclasses
+   with Pydantic args.
 2. Pick the file conventions for your domain — e.g. a
    `~/.finance-harness/` directory with strategy definitions,
    broker credentials, and audit settings.
@@ -79,12 +80,15 @@ choice. Sketch for a finance harness:
    (audit logging, P&L tracking, kill switches).
 
 `coding-harness` is the worked example of this pattern — read its
-source for the assembly shape. The same recipe applies to autoresearch
-(tools = search, fetch, summarise; conventions = research plans on
-disk), quant research (tools = data queries, notebook execution;
-conventions = experiment manifests), and so on.
+source for the assembly shape. End-to-end recipes for two specific
+verticals:
 
-→ Detailed primitives, quick starts, and public API:
+- → [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md)
+- → [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md)
+
+The same recipe applies to quant research, ops harnesses, and so on.
+
+→ Kernel API surface, loop diagram, and public symbols:
 [`packages/pyharness-sdk/README.md`](packages/pyharness-sdk/README.md)
 
 ### Extend `coding-harness` for a specific codebase or workflow
@@ -120,3 +124,8 @@ each run), you don't need a new harness — extend coding-harness:
 [`DESIGN.md`](DESIGN.md) — principles, the explicit refusals list
 (plan mode, MultiEdit, MCP, in-loop sub-agent delegation, …), the
 architecture overview, and what we borrowed from pi and Claude Code.
+
+## More
+
+[`docs/`](docs/README.md) — long-form guides, including the
+finance-harness and autoresearch-harness build recipes.
