@@ -1,9 +1,9 @@
-# pyharness design
+# pi-py design
 
-This document records the design principles, explicit refusals, and
-architecture for pyharness. Treat the refusals list as the answer key
-for "should we add X?": if X is on the list, the answer is "as an
-extension, not in core."
+Philosophy + refusals. **For implementation details, CLI usage, file
+conventions, and the full SDK walkthrough, the canonical doc is**
+[`packages/coding-harness/README.md`](packages/coding-harness/README.md).
+This file is the *why*; that file is the *how*.
 
 > **Comparable projects:** [pi-mono](https://github.com/badlogic/pi-mono)
 > (TypeScript) — the runtime-semantics inspiration; [Claude
@@ -13,6 +13,17 @@ extension, not in core."
 > spec we adopt; [AGENTS.md](https://agents.md/) — the cross-vendor
 > guidance file pyharness reads from every directory between the
 > project root and the workspace.
+
+## Where to read next
+
+| You want | Read |
+|---|---|
+| What pi-py does, the CLI, file conventions, SDK API | **[packages/coding-harness/README.md](packages/coding-harness/README.md)** ← canonical user doc |
+| Kernel internals (loop, events, contracts) | [packages/pyharness-sdk/README.md](packages/pyharness-sdk/README.md) |
+| Plugin entry points (skills + extensions via pip) | [docs/guides/plugins.md](docs/guides/plugins.md) |
+| Multi-agent orchestration patterns | [docs/guides/orchestration.md](docs/guides/orchestration.md) |
+| Domain-harness recipes (finance, autoresearch) | [docs/guides/build-finance-harness.md](docs/guides/build-finance-harness.md) · [autoresearch](docs/guides/build-autoresearch-harness.md) |
+| Top-level pitch | [README.md](README.md) |
 
 ## Design principles
 
@@ -63,6 +74,63 @@ extension, not in core."
 12. **Build the minimum that ships; defer features until concrete need
     appears.**
 
+## How the principles manifest
+
+The bridge from abstract principles to concrete code. Each subsection
+points at the full treatment elsewhere — DESIGN.md doesn't duplicate
+operational content.
+
+### Workspace and the project boundary
+One user-facing path (`workspace`); pyharness walks up to find a
+`.pyharness/` marker. Without one → `NoProjectError` (or pass
+`--bare`). Two config scopes: personal (`~/.pyharness/`) and project
+(the discovered marker). AGENTS.md is read at *every* directory
+between project root and workspace, bounded so home-adjacent guidance
+can't leak.
+**Full treatment:**
+[Workspace and config scopes](packages/coding-harness/README.md#workspace-and-config-scopes),
+[AGENTS.md](packages/coding-harness/README.md#agentsmd).
+
+### Tools — always-on vs frontmatter-pinned
+The eight builtins (`read`, `write`, `edit`, `bash`, `grep`, `glob`,
+`web_search`, `web_fetch`) plus `load_skill` are always registered.
+A named agent's `tools:` list is *additive* — pins additional
+non-builtin tools (project tools or skill tool modules) on top.
+Listing a builtin in `tools:` is a no-op.
+**Full treatment:**
+[Built-in Tools](packages/coding-harness/README.md#built-in-tools),
+[Named Agents](packages/coding-harness/README.md#named-agents).
+
+### Skills — on-demand capability bundles
+Folders with `SKILL.md` + optional `tools.py` + optional `hooks.py`.
+Discovered eagerly (filesystem + Python entry points), materialised
+lazily on `load_skill`. Live re-discovery on every call so a skill
+installed mid-run (e.g. via `npx skills add`) is loadable without
+restart. Named-agent `skills:` allowlist still applies — the
+contract holds.
+**Full treatment:**
+[Skills](packages/coding-harness/README.md#skills),
+[docs/guides/plugins.md](docs/guides/plugins.md).
+
+### Extensions — opt-in lifecycle hooks
+Python modules registering on the event bus. **Never auto-loaded** —
+must be explicitly named in the named agent's `extensions:`
+frontmatter, programmatic `extensions_enabled`, or `extra_extensions`
+callables. Discovery still runs unconditionally so the catalog is
+queryable.
+**Full treatment:**
+[Extensions](packages/coding-harness/README.md#extensions).
+
+### Plugin ecosystem
+Skills and extensions can ship from pip-installed packages via
+`pyharness.skills` and `pyharness.extensions` Python entry points.
+Namespaced as `<package>:<name>` to prevent collisions. No bespoke
+manifest, no install command — `pip install` is the install
+mechanism.
+**Full treatment:**
+[Plugins](packages/coding-harness/README.md#plugins),
+[docs/guides/plugins.md](docs/guides/plugins.md).
+
 ## Explicit refusals
 
 These features are rejected by design. If a future need genuinely
@@ -70,10 +138,9 @@ requires one, it lands as an extension, not as core code.
 
 - **TUI in the SDK or coding-harness package.** The agent loop must
   remain programmatic; its behaviour cannot depend on terminal state.
-  A TUI is allowed only as a **separate package** (`packages/tui/`,
-  importable as `pyharness_tui`) that subscribes to the event bus and
-  renders — never threading back into the SDK or coding-harness
-  layers. The SDK and coding-harness packages stay headless.
+  A TUI is allowed only as a separate package (`packages/tui/`) that
+  subscribes to the event bus and renders — never threading back into
+  the SDK or coding-harness layers.
 - **Interactive permission prompts.** Tools execute or fail. Approval
   gates would block scheduled and SDK-driven runs.
 - **In-loop sub-agent delegation** (Task tool, delegate tool). Multi-
@@ -86,8 +153,8 @@ requires one, it lands as an extension, not as core code.
 - **MultiEdit tool.** Single Edit only — keeps the diff surface
   reviewable and the failure modes few.
 - **Approval gates.** No human-in-the-loop pauses inside the loop.
-- **Doom-loop detection.** `max_turns` is enough. Heuristics that
-  guess "stuck" are noise.
+- **Doom-loop detection.** `max_turns` is enough. Heuristics that guess
+  "stuck" are noise.
 - **Cost budget enforcement.** Logging is enough for v1; if budgets
   matter later, an extension subscribing to `after_llm_call` is the
   right place.
@@ -100,8 +167,8 @@ requires one, it lands as an extension, not as core code.
 - **MCP support.** Out of scope for v1. The tool ABC is local Python;
   MCP can ship as an extension later.
 - **Plugin trust / sandboxing.** Entry-point plugins run arbitrary
-  Python at import time. We rely on pip's install boundary; we do
-  not gate plugins behind an allow list or signature check in v1.
+  Python at import time. We rely on pip's install boundary; we do not
+  gate plugins behind an allow list or signature check in v1.
 - **Mid-run extension toggle.** Extensions are bound at session start
   only. Disabling mid-run would leave dangling tool references and
   partial-effect state. If a kill switch is needed, ship it as an
@@ -109,145 +176,18 @@ requires one, it lands as an extension, not as core code.
 
 ## Architecture
 
-The repo is a pi-mono–style monorepo with three packages. The split
-mirrors pi-mono: a small kernel (`pyharness-sdk`, like
-`packages/agent`) plus one concrete application built on it
-(`coding-harness`, like `packages/coding-agent`) plus a separate TUI
-package.
+Three packages — a small kernel (`packages/pyharness-sdk`), one
+concrete application built on it (`packages/coding-harness`), and a
+stdlib REPL (`packages/tui`). The kernel is loop-only; conventions
+(file discovery, settings, named agents, skills, extensions, tools,
+CLI) live in the application. Domain-specific harnesses (finance,
+autoresearch, …) are project directories with `.pyharness/` files —
+no subclassing, no fork.
 
-```
-+--------------------+        +--------------------+        +------------+
-| coding-harness CLI |  -->   | CodingAgent        |  -->   | Agent loop |
-| (pyharness "task") |        | (assembly layer)   |        | (kernel)   |
-+--------------------+        +--------------------+        +------------+
-                                       |                          |
-                                       v                          v
-                          +-----------------------+   +----------------------+
-                          | Settings + Workspace  |   | LLMClient (LiteLLM)  |
-                          | + AGENTS.md + Skills  |   +----------------------+
-                          | + Sub-agents + Tools  |              |
-                          | + Extensions loader   |              v
-                          +-----------------------+   +----------------------+
-                                                      | ToolRegistry         |
-                                                      | (Pydantic-validated) |
-                                                      +----------------------+
-                                                                 |
-                                                                 v
-                                                      +----------------------+
-                                                      | EventBus             |
-                                                      | (extension hooks)    |
-                                                      +----------------------+
-                                                                 |
-                                                                 v
-                                                      +----------------------+
-                                                      | Session JSONL log    |
-                                                      | (durable record)     |
-                                                      +----------------------+
-```
-
-### `pyharness-sdk` (kernel — package `pyharness`)
-
-The loop and its primitives. No file conventions, no settings, no
-CLI. This is what a domain-specific harness builds on.
-
-- **`loop.py`** — `Agent` and `AgentOptions`. The straight-line loop:
-  drain steering / follow-up queues, maybe compact, call LLM, execute
-  tools (checking steering between calls), repeat until the LLM
-  returns no tool calls or `max_turns` is hit. `Agent.start()`
-  returns an `AgentHandle` for live steering; `Agent.run()` is the
-  blocking equivalent.
-- **`llm.py`** — thin LiteLLM wrapper. Streaming canonical;
-  non-stream is sugar that consumes the stream. Anthropic prompt
-  caching is applied when the model is a Claude / Anthropic model.
-- **`tools/base.py`** — `Tool` ABC, `ToolRegistry`, `ToolContext`,
-  OpenAI-shape schema generator. `execute_tool` validates args via
-  Pydantic; failures and exceptions become `ok=False` results so the
-  loop hands them back to the LLM rather than crashing.
-- **`session.py`** — append-only JSONL log with atomic writes.
-  Supports resume and fork by event sequence number. Reconstructs LLM
-  message history from the log on resume.
-- **`events.py`** — typed event payloads; the union of session-log
-  events (`SessionStartEvent`, `ToolCallEndEvent`, …) and lifecycle
-  events (`LifecycleEvent`).
-- **`extensions.py`** — `EventBus`, `ExtensionAPI`, `HookOutcome`,
-  `HookResult`, `HandlerContext`. First non-Continue outcome wins;
-  extension exceptions are logged and skipped. The file-discovery
-  loader does NOT live here (it's a coding-harness concern).
-- **`compaction.py`** — `Compactor`. Keeps system + last N messages;
-  summarises the middle via the cheaper `summarization_model`.
-- **`queues.py`** — `MessageQueue` and `AgentHandle` for steering and
-  follow-up.
-- **`types.py`** — `Message`, `ToolCall`, `LLMResponse`, `RunResult`,
-  `TokenUsage`, `StreamEvent`. All Pydantic.
-
-### `coding-harness` (application — package `coding_harness`)
-
-Reads settings, walks AGENTS.md, discovers skills, loads extensions,
-builds a tool registry, constructs a `pyharness.Agent`. One concrete
-harness built on the kernel — same recipe applies to a finance or
-autoresearch harness.
-
-- **`coding_agent.py`** — `CodingAgent`, `CodingAgentConfig`, the
-  `BASE_SYSTEM_PROMPT`. The assembly layer: `__init__` reads
-  settings → resolves the named agent (always registers builtins
-  plus any frontmatter-pinned non-builtin tools) → discovers skills
-  (filesystem + entry points) → applies the `skills:` allowlist and
-  `extra_skills` overlays → registers `load_skill` → renders the
-  system prompt (with AGENTS.md `@import` lines deferred and the
-  skill index as a `<system-reminder>` block) → builds the
-  `EventBus`, discovers extensions, and activates only those
-  explicitly enabled (named-agent frontmatter, `extensions_enabled`,
-  or `extra_extensions` callables) → maps `Settings` to
-  `AgentOptions` → instantiates `pyharness.Agent`. SDK overlays
-  (`extra_skills`, `extra_tools`, `extra_extensions`) let embedders
-  inject capabilities without writing files.
-- **`config.py`** — `Settings` Pydantic model loaded from personal +
-  project + CLI overrides.
-- **`workspace.py`** — discovers project root (nearest ancestor with
-  `.pyharness/`), walks AGENTS.md in most-general-first order
-  (rewriting `@<path>` lines as deferred-read pointers instead of
-  inlining their content), and collects
-  `<scope>/.pyharness/{agents,skills,tools,extensions}` dirs.
-- **`agents.py`** — frontmatter parser, agent discovery, tool
-  resolution. Resolves declared tool names against builtins → project
-  tools → skill tools.
-- **`skills.py`** — `SkillDefinition`, discovery (filesystem
-  bundles plus `pyharness.skills` entry points), `build_skill_index`
-  rendering as a `<system-reminder>` block with loaded/available
-  split, and the `load_skill` built-in tool. Skill bundles
-  (`SKILL.md` + `tools.py` + `hooks.py`) let a skill ship its own
-  lifecycle hooks; the hooks register only when the skill activates.
-- **`extensions_loader.py`** — discovers the catalog of available
-  extensions (filesystem walk of `<scope>/.pyharness/extensions/` plus
-  `pyharness.extensions` entry points) and imports/activates only the
-  names in the enabled set. **Extensions are never auto-loaded.**
-- **`_loader.py`** — shared dynamic-import helper for tools and skill
-  modules.
-- **`tools/builtin/`** — the eight defaults: `read`, `write`, `edit`,
-  `bash` (with hard-blocks), `grep`, `glob`, `web_search`,
-  `web_fetch`.
-- **`cli.py`** — argparse front-end. Provides the `pyharness` console
-  script.
-
-### `tui` (REPL — package `pyharness_tui`)
-
-Stdlib-only REPL that subscribes to the event bus and prints. Loop
-behaviour is unaffected; the TUI never threads back into the SDK or
-coding-harness layers.
-
-## Lifecycle events
-
-Extensions can subscribe to:
-
-- `session_start`, `session_end`
-- `turn_start`, `turn_end`
-- `before_llm_call`, `after_llm_call`
-- `before_tool_call`, `after_tool_call`
-- `compaction_start`, `compaction_end`
-- `steering_received`, `followup_received`
-
-`HookOutcome` values: `Continue`, `Deny`, `Modify`, `Replace`. The first
-non-Continue outcome wins.
+**Full code-flow walkthrough** (the assembly steps, what each module
+does, where to make changes):
+[What happens when you run `pyharness "fix the failing tests"`](packages/coding-harness/README.md#what-happens-when-you-run-pyharness-fix-the-failing-tests)
+in the coding-harness README.
 
 ## What we borrowed
 
@@ -259,18 +199,11 @@ non-Continue outcome wins.
   `<system-reminder>` block listing names + descriptions, body and
   tools materialised only when the model invokes `load_skill`.
 - **Plugin namespacing** — `<package>:<name>` prefix mirrors Claude
-  Code's `<plugin>:<skill-name>` shape. Implemented via Python
-  entry points so pip is the install mechanism.
+  Code's `<plugin>:<skill-name>` shape. Implemented via Python entry
+  points so pip is the install mechanism.
 - **Runtime semantics** — pi's loop shape (drain queues at the top of
   the turn, steering between tool calls, follow-up between turns) and
   pi's preference for files-as-truth and JSONL logs.
 - **Hierarchical scopes** — both Claude Code and pi use scope walks;
   pyharness composes them in most-general-first order so concatenation
   produces the right precedence.
-
-## Line budget
-
-Target: under 1500 lines combined for `packages/pyharness-sdk/src/`
-and `packages/coding-harness/src/`, excluding tests, examples, and
-generated code. Anything that pushes past the budget should either
-move to an extension or be cut.
