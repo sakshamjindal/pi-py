@@ -1,6 +1,6 @@
 # pi-py
 
-A Python agent harness designed as an embeddable primitive — for
+A Python agent harness designed as an **embeddable primitive** — for
 autonomous, long-running, programmatically-driven use cases where the
 harness is one component of a larger system, rather than a chat
 product used directly by humans.
@@ -9,34 +9,39 @@ The intent is that **domain-specific harnesses are built on top of
 pi-py** rather than reinventing the loop, the session log, the tool
 ABC, and the extension surface every time.
 
-## What's in the box
+> Inspired by [pi-mono](https://github.com/badlogic/pi-mono):
+> minimal core, files-as-truth, observability over magic. File
+> formats from Claude Code (frontmatter agents, SKILL.md). Own
+> choices: Python (so tools are Python), LiteLLM, headless and
+> programmatic over interactive.
 
-```
-packages/
-  pyharness-sdk/   # the kernel — agent loop, LLM client, tool ABC,
-                   # sessions, queues, events, extension runtime.
-                   # This is what you build your own harness on.
+---
 
-  coding-harness/  # one concrete harness built on the kernel: the
-                   # bundled coding agent (settings, AGENTS.md,
-                   # named sub-agents, skills, extensions discovery,
-                   # built-in tools, CLI). Itself extensible.
+## Table of Contents
 
-  tui/             # stdlib REPL for dogfooding the coding harness.
-```
+- [What's in the Box](#whats-in-the-box)
+- [Quick Start](#quick-start)
+- [Project-as-Files](#project-as-files)
+- [Philosophy](#philosophy)
+- [Documentation](#documentation)
 
-- **`pyharness-sdk`** — the primitive. Use this when you're building
-  a *new* harness for a specific domain (a finance harness, an
-  autoresearch harness, …). It gives you the loop and the contracts;
-  you supply the system prompt, tools, and conventions.
-- **`coding-harness`** — a reference harness for coding tasks. Use
-  this when you want pyharness as a ready-to-run coding agent. It
-  also has its own extension and tool layer, so it can be specialised
-  for a particular codebase or workflow without forking.
-- **`pyharness-tui`** — minimal interactive shell for trying the
-  coding harness from your terminal.
+---
 
-## How to run
+## What's in the Box
+
+| Package | Purpose |
+|---|---|
+| **[`pyharness-sdk`](packages/pyharness-sdk/)** | The kernel — agent loop, LLM client, tool ABC, sessions, queues, events, extension runtime. **Build your own harness on this** when you need a domain-specific agent (finance, research, …). |
+| **[`coding-harness`](packages/coding-harness/)** | A reference harness built on the kernel: file conventions (`.pyharness/`, `AGENTS.md`), settings hierarchy, named sub-agents, skills, opt-in extensions, eight built-in tools, plugin entry points, the `pyharness` CLI. **Use this when you want pyharness as a ready-to-run coding agent**, or as the assembly layer for a domain harness. |
+| **[`tui`](packages/tui/)** | Minimal stdlib REPL for dogfooding the coding harness. |
+
+> **For most users, [`coding-harness`](packages/coding-harness/) is
+> the entry point.** The SDK is for when you're building a *new*
+> harness, not using one.
+
+---
+
+## Quick Start
 
 ```bash
 git clone <this repo>
@@ -47,47 +52,47 @@ pip install -e packages/pyharness-sdk \
             -e packages/tui \
             -e ".[dev]"
 
-export ANTHROPIC_API_KEY=sk-...   # or OPENAI_API_KEY, etc.
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.
 
-# bundled coding agent
+# Bundled coding agent
 pyharness "fix the failing tests"
 
-# interactive REPL
+# Interactive REPL
 pyharness-tui
 ```
 
 That's enough to use the coding harness today. For flags, settings,
-named agents, skills, and extensions, see
+named agents, skills, extensions, and the SDK API, see
 [`packages/coding-harness/README.md`](packages/coding-harness/README.md).
 
-## Extending: the project-as-files pattern
+---
 
-**You don't subclass anything.** You set up a project directory with the
+## Project-as-Files
+
+**You don't subclass anything.** Set up a project directory with the
 right files in `<project>/.pyharness/` and run
 `pyharness --workspace /your/project --agent <name> "task"`.
 
-Pyharness is the engine. A "finance harness" or "autoresearch harness"
-is just a project directory with domain-specific tools, agent definitions,
-skills, extensions, and an AGENTS.md — files that pyharness consumes.
-Pyharness doesn't know what domain it's running in.
-
-The project layout:
+pi-py is the engine. A "finance harness" or "autoresearch harness"
+is just a project directory with domain-specific tools, agent
+definitions, skills, extensions, and an `AGENTS.md` — files that
+pi-py consumes. It doesn't know what domain it's running in.
 
 ```
 /your-project/
-  AGENTS.md                              # domain philosophy (supports `@import` for big refs)
+  AGENTS.md                              # domain philosophy (supports `@import`)
   .pyharness/
-    settings.json                        # model defaults, cost caps, domain-specific keys
-    agents/                              # named agent definitions
-      analyst.md                         # frontmatter: name, model, tools, extensions, skills; body: system prompt
+    settings.json                        # model defaults, cost caps, domain keys
+    agents/                              # named agent definitions (frontmatter)
+      analyst.md
       reviewer.md
-    tools/                               # domain tools (Python modules with TOOLS = [...])
-      market_data.py                     # get_quote, get_fundamentals, ...
-      proposals.py                       # propose_trade, flag_for_review, ...
+    tools/                               # domain tools (TOOLS = [...] in each module)
+      market_data.py
+      proposals.py
     skills/                              # on-demand capability bundles
       options-analysis/                  # SKILL.md + tools.py + (optional) hooks.py
-    extensions/                          # opt-in lifecycle hooks (must be named in frontmatter)
-      audit_logger.py                    # register(api) -> subscribe to events
+    extensions/                          # opt-in lifecycle hooks
+      audit_logger.py
       circuit_breaker.py
   workflows/                             # orchestration: plain Python driving CodingAgent
     morning_routine.py
@@ -96,6 +101,7 @@ The project layout:
 Then drive it:
 
 ```python
+from pathlib import Path
 from coding_harness import CodingAgent, CodingAgentConfig
 
 agent = CodingAgent(CodingAgentConfig(
@@ -111,41 +117,50 @@ Or from the CLI:
 pyharness --workspace /your-project --agent analyst "deep dive on AAPL"
 ```
 
-Full worked examples:
+Plug-ins, too: skills and extensions can ship as **pip-installable
+packages** via Python entry points (`pyharness.skills`,
+`pyharness.extensions`), so you can publish a domain library and let
+others install it with `pip install acme-finance-tools`.
 
-- **Finance:** [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md) —
-  30-50 tools, 5 agents, orchestrated morning routine, eval suite, feedback loop.
-- **Autoresearch:** [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md) —
-  research tools, literature review / synthesis / experiment agents, iterative research loop.
-- **Plugins:** [`docs/guides/plugins.md`](docs/guides/plugins.md) —
-  publish skills and extensions from a pip-installed library via
-  Python entry points (`pyharness.skills`, `pyharness.extensions`).
-- **Orchestration:** [`docs/guides/orchestration.md`](docs/guides/orchestration.md) —
-  pipelines, fan-out, and supervisor patterns. Plain Python recipes,
-  no framework.
+---
 
-→ Conventions, per-feature docs:
-[`packages/coding-harness/README.md`](packages/coding-harness/README.md)
+## Philosophy
 
-→ SDK primitives and public API:
-[`packages/pyharness-sdk/README.md`](packages/pyharness-sdk/README.md)
+pi-py is aggressively minimal so it doesn't dictate your workflow.
 
-## Lineage
+**No in-loop sub-agents.** Multi-agent runs are subprocesses; the
+harness composes from the outside. Recipes in
+[`examples/orchestration/`](examples/orchestration/).
 
-- **Runtime semantics from [pi](https://github.com/badlogic/pi-mono)** —
-  minimal core, files-as-truth, observability over magic.
-- **File formats from Claude Code** — frontmatter agent definitions,
-  standardized skills layout.
-- **Own choices** — Python (so tools are Python), LiteLLM for provider
-  abstraction, headless and programmatic over interactive.
+**No plan mode, no `TodoWrite`, no `MultiEdit`.** Plans hide work
+from the observability layer; agents already structure their work
+via tool calls. The model writes plans to files like any other
+artefact.
 
-## Design
+**No interactive permission prompts.** Tools execute or fail.
+Approval gates would block scheduled and SDK-driven runs.
 
-[`DESIGN.md`](DESIGN.md) — principles, the explicit refusals list
-(plan mode, MultiEdit, MCP, in-loop sub-agent delegation, …), the
-architecture overview, and what we borrowed from pi and Claude Code.
+**No auto-loaded extensions.** Extensions affect the loop directly
+(deny LLM calls, modify messages, register tools). Auto-load would
+leak blast radius across roles. Opt in by name.
 
-## More
+**No MCP in core.** The tool ABC is local Python; MCP can ship as an
+extension.
 
-[`docs/`](docs/README.md) — long-form guides, including the
-finance-harness and autoresearch-harness build recipes.
+See [`DESIGN.md`](DESIGN.md) for the full principles and explicit
+refusals list.
+
+---
+
+## Documentation
+
+| Doc | What |
+|---|---|
+| [`DESIGN.md`](DESIGN.md) | Design principles, refusals, architecture |
+| [`packages/coding-harness/README.md`](packages/coding-harness/README.md) | The CLI, file conventions, SDK API, every flag |
+| [`packages/pyharness-sdk/README.md`](packages/pyharness-sdk/README.md) | Kernel primitives and the loop diagram |
+| [`packages/tui/README.md`](packages/tui/README.md) | Interactive shell |
+| [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md) | End-to-end walkthrough: 30-50 tools, 5 agents, morning routine |
+| [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md) | Same recipe for research workflows |
+| [`docs/guides/plugins.md`](docs/guides/plugins.md) | Publishing skills and extensions from a pip-installed library |
+| [`docs/guides/orchestration.md`](docs/guides/orchestration.md) | Pipeline, fan-out, supervisor patterns. Recipes, not a framework. |

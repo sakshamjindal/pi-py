@@ -1,164 +1,384 @@
-# coding-harness — coding-agent scaffolding
+# coding-harness
 
-Builds on the [`pyharness`](../pyharness-sdk/) SDK kernel to provide
-the out-of-the-box behaviour of the bundled coding agent: file
-conventions (AGENTS.md, `.pyharness/` directories), settings
-hierarchy, named sub-agents, skills, extensions discovery, eight
-built-in tools, and the `pyharness` CLI.
+A minimal Python coding harness. Adapt it to your workflows, not the
+other way around, without forking the loop. Extend it with
+[Skills](#skills), [Extensions](#extensions), [Named Agents](#named-agents),
+[Tools](#tools), and [Plugins](#plugins). Drop your customisations in
+`.pyharness/` or publish them as a pip-installable package and share with
+others.
 
-Mirrors pi-mono's [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-as the application layer.
+`coding-harness` ships with sane defaults and skips features like in-loop
+sub-agents, plan mode, permission popups, and `TodoWrite` (see
+[Philosophy](#philosophy)). Instead, you compose what you need from
+small, observable building blocks.
 
-Despite the name, `coding-harness` is domain-agnostic. The assembly
-layer — settings hierarchy, AGENTS.md walking, named agents, skills,
-extensions discovery, tool resolution — works for any domain. The
-`BASE_SYSTEM_PROMPT` is generic; domain identity comes from your
-AGENTS.md and agent definitions.
+It runs in three modes: **CLI** for one-shot tasks, **SDK** for embedding
+in your own apps, and via the bundled [TUI](../tui/) for interactive
+dogfooding.
 
-To build a finance harness, an autoresearch harness, or any other
-domain harness: set up a project directory with `.pyharness/` files
-and point `CodingAgent` at it. No subclassing needed.
-
-See the full guides:
-- [`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
-- [`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md)
+> Built on the [`pyharness-sdk`](../pyharness-sdk/) kernel. The kernel is
+> the loop and primitives; this package is the file conventions, settings
+> hierarchy, named-agent resolution, skill index, extension activation,
+> built-in tools, and the `pyharness` CLI.
 
 ---
 
-## What happens when you run `pyharness "fix the failing tests"`
+## Table of Contents
 
-```
-$ pyharness "fix the failing tests"
-       │
-       v
-1.  cli.main() parses argv. The `sessions` subcommand is detected
-    BEFORE argparse runs (because the prompt nargs="*" would
-    swallow it). Otherwise it builds CodingAgentConfig from the
-    flags + cwd and calls _run() under asyncio.
+- [Quick Start](#quick-start)
+- [CLI](#cli)
+- [Concepts](#concepts)
+  - [Workspace](#workspace)
+  - [AGENTS.md](#agentsmd)
+  - [Settings](#settings)
+- [Customisation](#customisation)
+  - [Named Agents](#named-agents)
+  - [Skills](#skills)
+  - [Extensions](#extensions)
+  - [Tools](#tools)
+  - [Plugins](#plugins)
+- [Programmatic Use (SDK)](#programmatic-use-sdk)
+- [Orchestration](#orchestration)
+- [Sessions](#sessions)
+- [Built-in Tools](#built-in-tools)
+- [Philosophy](#philosophy)
+- [CLI Reference](#cli-reference)
 
-2.  CodingAgent(config) — the assembly layer. In __init__:
-       │
-       ├─ WorkspaceContext(workspace)
-       │     walks UP from workspace looking for `.pyharness/` to
-       │     find the project root (or None). Two config scopes:
-       │     ~/.pyharness/ and <project_root>/.pyharness/. AGENTS.md
-       │     is collected from EVERY directory on the path from ~/
-       │     down to workspace, general-first.
-       │
-       ├─ Settings.load(workspace, project_root, cli_overrides)
-       │     reads ~/.pyharness/settings.json + <project>/.pyharness/
-       │     settings.json + CLI overrides (in that merge order;
-       │     last wins).
-       │
-       ├─ self.session = Session.new() | resume() | fork()
-       │
-       ├─ _build_tool_registry()
-       │     Builtins are ALWAYS registered (8 defaults).
-       │     If --agent NAME was passed: also resolve the agent's
-       │     frontmatter `tools:` list against project tools / skill
-       │     tools and pin those as additional always-on tools.
-       │     `["*"]` or empty / missing means "just builtins."
-       │
-       ├─ discover_skills(workspace_ctx)
-       │     walk <scope>/.pyharness/skills/*/SKILL.md AND query
-       │     `pyharness.skills` Python entry points (pip-installed
-       │     plugins). No skill code is imported at this stage.
-       │     Filter the discovered set by the named agent's frontmatter
-       │     `skills:` allowlist (or `["*"]` / missing = all). Merge
-       │     `extra_skills` overlays from CodingAgentConfig.
-       │     Register `load_skill` tool last (so it can see the other
-       │     tools to mutate the registry on demand).
-       │
-       ├─ _build_system_prompt()
-       │     BASE_SYSTEM_PROMPT + AGENTS.md (every ancestor's, general-
-       │     first, with @import lines NOT inlined) + agent body
-       │     (if named) + skill index rendered as a <system-reminder>
-       │     block.
-       │
-       ├─ discover_extensions(...)
-       │     walk <scope>/.pyharness/extensions/ AND query
-       │     `pyharness.extensions` Python entry points. NOTHING is
-       │     imported or activated at this stage; this is just a catalog.
-       │
-       ├─ if not bare:
-       │     resolve the enabled extension list (CodingAgentConfig
-       │     `extensions_enabled` overrides the named agent's
-       │     frontmatter `extensions:` list; default is empty —
-       │     extensions are NEVER auto-loaded).
-       │     ExtensionAPI(bus, registry, settings) and load_extensions()
-       │     imports each enabled module and calls register(api). Any
-       │     `extra_extensions` callables on CodingAgentConfig also run.
-       │
-       ├─ LLMClient() + Compactor()
-       │
-       ├─ _build_agent()  — map Settings → AgentOptions and
-       │     instantiate pyharness.Agent with the assembled
-       │     system_prompt, tool_registry, session, event_bus,
-       │     llm, compactor.
-       │
-       └─ self._agent = Agent(...)
+---
 
-3.  await agent.run(prompt) → delegates to self._agent.run()
-       │
-       v
-   pyharness.Agent loop runs (see ../pyharness-sdk/README.md for
-   the loop diagram). Every step writes to the JSONL session log
-   and emits events on the bus. Extensions can deny/replace tool
-   calls or LLM calls.
+## Quick Start
 
-4.  _attach_human_stream subscribes to the bus and prints `  → toolname`
-    on each tool call to stderr (or _attach_json_stream emits NDJSON
-    on stdout if --json was passed).
+```bash
+pip install -e packages/pyharness-sdk -e packages/coding-harness
 
-5.  When the loop terminates, _run() prints result.final_output to
-    stdout and the run-not-completed reason to stderr. Process
-    exit code: 0 if completed else 1.
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, etc.
+
+pyharness "fix the failing tests"
 ```
 
-This is the recipe a domain-specific harness mirrors. See
-[`build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
-for the same flow applied to a different vertical.
+That's enough to use the bundled coding agent. With no `.pyharness/`
+anywhere up the tree, the agent runs with the eight built-in tools and
+no extensions activated. Add capabilities incrementally via
+[skills](#skills), [extensions](#extensions), [named agents](#named-agents),
+or pip-installed [plugins](#plugins).
 
 ---
 
 ## CLI
 
 ```bash
-# One-shot in the current directory.
+# One-shot in cwd
 pyharness "fix the failing tests"
 
-# Specify model or workspace.
-pyharness --model claude-opus-4-7 "review the code"
-pyharness --workspace /tmp/scratch "summarise this directory"
+# Different model or workspace
+pyharness --model claude-opus-4-7 "review the diff"
+pyharness --workspace /tmp/scratch "summarise this dir"
 
-# Stream events as JSONL on stdout (good for parent processes).
+# Stream events as JSONL (good for parent processes)
 pyharness --json "create a TODO list in TODO.md"
 
-# Skip extensions / AGENTS.md / settings.
+# Skip extensions / AGENTS.md / settings
 pyharness --bare "task"
 
-# Continue or resume.
-pyharness -c "follow up message"               # continue most-recent in cwd
-pyharness -r                                   # list recent sessions for cwd
-pyharness --session <id> "continue with X"     # resume specific session
-pyharness --fork <id> "alternative path"       # fork from a session
-pyharness --fork <id> --at-event 12 "..."      # fork at a specific event
+# Continue or resume
+pyharness -c "follow up message"             # continue most-recent in cwd
+pyharness -r                                 # list recent sessions for cwd
+pyharness --session <id> "continue with X"   # resume specific session
+pyharness --fork <id> "alternative path"     # fork from a session
+pyharness --fork <id> --at-event 12 "..."    # fork at a specific event
 
-# Inspect sessions.
+# Inspect sessions
 pyharness sessions ls
 pyharness sessions show <id>
 pyharness sessions replay <id>
 
-# Run a named agent (defined in <scope>/.pyharness/agents/<name>.md).
+# Run a named agent
 pyharness --agent research-analyst "what changed in the markets today?"
 ```
 
-## Programmatic use (SDK)
+For the full flag list, see the [CLI Reference](#cli-reference) below.
 
-`CodingAgent` is the public SDK entry point. The CLI is a thin
-wrapper around it; embed it directly in your own application.
+---
 
-### Basic embed
+## Concepts
+
+### Workspace
+
+The **operating directory** for the agent. Set with `--workspace`
+(CLI) or `CodingAgentConfig.workspace`. Defaults to cwd. All file
+tools resolve relative paths against it.
+
+> Why a flag? `coding-harness` is SDK-first. A server or async
+> orchestrator may run multiple agents concurrently in one process,
+> each operating on a different directory. `os.chdir()` is
+> process-global and races between async tasks. `workspace=` is the
+> only safe way to isolate file work.
+
+The **project root** is the closest ancestor of the workspace that
+contains a `.pyharness/` directory. Discovered automatically by
+walking up from the workspace and stopping at `$HOME`.
+
+**Two config scopes** for `.pyharness/<thing>` (settings, agents,
+skills, tools, extensions):
+
+| Scope | Path |
+|---|---|
+| Personal | `~/.pyharness/` (always) |
+| Project | `<project_root>/.pyharness/` (if discovered) |
+
+Most-general-first: project entries override personal on name
+collision. There is **no** third "workspace" scope — if you want
+workspace-local config, drop a `.pyharness/` in the workspace and it
+becomes the project root automatically.
+
+### AGENTS.md
+
+Every directory on the path from `~/` down to the workspace is
+scanned for an `AGENTS.md`. Matches how Claude Code walks
+`CLAUDE.md`. Nested guidance composes naturally:
+
+```
+~/AGENTS.md                            # personal (always)
+~/work/AGENTS.md                       # parent-of-projects guidance
+~/work/repo/AGENTS.md                  # repo-level (project root)
+~/work/repo/src/AGENTS.md              # subdirectory rules
+~/work/repo/src/components/AGENTS.md   # subpackage rules
+```
+
+If your workspace is `~/work/repo/src/components/`, all five files
+are concatenated in general-first order so the most-specific ones
+appear last and override.
+
+Lines starting with `@<path>` are **deferred imports** — not inlined:
+
+```markdown
+# AGENTS.md
+Top-level guidance.
+
+@docs/architecture.md
+@~/notes/large-reference.md
+```
+
+Each `@<path>` is replaced with a one-line pointer telling the agent
+"read this file on demand using the `read` tool." Imports are
+resolved relative to the AGENTS.md they appear in.
+
+### Settings
+
+Two layers, later wins:
+
+| Path | Scope |
+|---|---|
+| `~/.pyharness/settings.json` | Global |
+| `<project_root>/.pyharness/settings.json` | Project |
+
+Plus CLI flags as a third overriding layer. Example:
+
+```json
+{
+  "default_model": "claude-opus-4-7",
+  "summarization_model": "claude-haiku-4-5",
+  "max_turns": 100,
+  "compaction_threshold_pct": 0.8,
+  "search_provider": "brave",
+  "search_api_key_env": "BRAVE_API_KEY"
+}
+```
+
+See `coding_harness.config.Settings` for the full key list.
+
+---
+
+## Customisation
+
+### Named Agents
+
+Markdown files at `<scope>/.pyharness/agents/<name>.md`. YAML
+frontmatter declares identity, model, and per-role allowlists; the
+body becomes the system prompt prefix.
+
+```yaml
+---
+name: research-analyst
+description: Pulls market data and writes a daily summary.
+model: claude-opus-4-7         # optional; overrides settings.default_model
+tools:                          # additional non-builtin tools (additive over builtins)
+  - get_quote
+extensions:                     # OPT-IN; missing => no extensions activate
+  - cost-tracker
+  - kill-switch
+  - acme:pii-redactor          # entry-point plugin (package:name)
+skills:                         # allowlist; missing or ["*"] = all in scope
+  - market-data
+---
+
+You are a research analyst...   # body becomes the system prompt prefix
+```
+
+**Resolution rules:**
+
+| Field | Semantics |
+|---|---|
+| `tools:` | Additive over builtins. Listing a builtin is a no-op. Empty / missing / `["*"]` = just builtins. Non-builtin names must resolve against project tools or skill modules. |
+| `extensions:` | Strict allowlist. Missing field = no extensions. Names match `discover_extensions()` output, including `package:name` for plugins. |
+| `skills:` | Allowlist for what appears in the prompt index AND can be loaded via `load_skill`. Missing or `["*"]` = all in scope visible. |
+
+Run with `pyharness --agent research-analyst "..."`.
+
+Place in `~/.pyharness/agents/`, `<project>/.pyharness/agents/`, or
+ship via a [plugin](#plugins) to share.
+
+### Skills
+
+On-demand capability bundles at `<scope>/.pyharness/skills/<name>/`.
+Each skill is a directory:
+
+```
+.pyharness/skills/market-data/
+  SKILL.md      # frontmatter + body (instructions returned on load)
+  tools.py      # optional: module exposing `TOOLS = [...]`
+  hooks.py      # optional: module exposing `register(api)` (skill bundle)
+```
+
+Skills appear in the system prompt as a `<system-reminder>` block
+listing names + one-line descriptions. The agent calls the
+`load_skill` built-in tool when a description matches the task; the
+tool dynamically imports the skill's `tools.py`, registers its tools
+into the live registry, runs `hooks.py:register(api)` if present,
+and returns the SKILL.md body as instructions.
+
+```markdown
+---
+name: market-data
+description: Use when fetching real-time quotes or fundamentals.
+tools: [get_quote, get_fundamentals]
+---
+
+When fetching market data, prefer get_quote for current prices and
+get_fundamentals for ratios. Always cite the source.
+```
+
+Skill bundles (with a `hooks.py`) let a skill ship its own lifecycle
+hooks alongside its tools — hooks register only when the skill
+activates, so they don't leak into agents that never load it.
+
+Place in `~/.pyharness/skills/`, `<project>/.pyharness/skills/`, or
+ship via a [plugin](#plugins). See [docs/guides/plugins.md](../../docs/guides/plugins.md).
+
+### Extensions
+
+Python modules at `<scope>/.pyharness/extensions/<name>.py`. Each
+exposes a `register(api)` that subscribes to lifecycle events:
+
+```python
+from pyharness import ExtensionAPI, HookOutcome
+
+def register(api: ExtensionAPI) -> None:
+    api.on("before_tool_call", _gate)
+
+async def _gate(event, ctx):
+    if event.payload["tool_name"] == "bash":
+        return HookOutcome.deny("bash disabled in this project")
+    return HookOutcome.cont()
+```
+
+> **Extensions are never auto-loaded.** Even if a `.py` file exists
+> in `.pyharness/extensions/`, it stays dormant unless explicitly
+> enabled via the named agent's `extensions:` frontmatter,
+> `CodingAgentConfig.extensions_enabled`, or the
+> `extra_extensions` programmatic overlay.
+
+Why opt-in? Extensions can deny LLM calls, modify messages, and
+register tools. That blast radius shouldn't be opt-out.
+`discover_extensions()` always returns the catalog (so a TUI can list
+what's available); activation is an explicit choice.
+
+Place in `~/.pyharness/extensions/` or `<project>/.pyharness/extensions/`,
+or ship via a [plugin](#plugins).
+
+### Tools
+
+Project-level Python tools at `<scope>/.pyharness/tools/<name>.py`.
+Each module exposes `TOOLS = [...]` of `Tool` instances — they
+become available to named agents that list them in `tools:`
+frontmatter.
+
+```python
+# .pyharness/tools/market_data.py
+from pydantic import BaseModel, Field
+from pyharness import Tool, ToolContext
+
+class _GetQuoteArgs(BaseModel):
+    ticker: str = Field(description="Ticker symbol")
+
+class GetQuote(Tool):
+    name = "get_quote"
+    description = "Fetch the current quote for a ticker."
+    args_schema = _GetQuoteArgs
+
+    async def execute(self, args, ctx: ToolContext):
+        return {"price": 192.34}  # implement for real
+
+TOOLS = [GetQuote()]
+```
+
+For tools that should always be available across all agents, use
+[built-in tools](#built-in-tools) in this package. For domain
+specialists, use this directory.
+
+### Plugins
+
+Skills and extensions can also ship from **pip-installed Python
+packages** via standard entry points. No filesystem layout needed.
+
+```toml
+# Library's pyproject.toml
+[project.entry-points."pyharness.skills"]
+sec-filings = "acme.skills.sec_filings"
+
+[project.entry-points."pyharness.extensions"]
+pii-redactor = "acme.extensions:register_pii"
+```
+
+Entry-point plugins are auto-discovered and namespaced as
+`<package>:<name>` (e.g. `acme-finance-tools:sec-filings`) so plain
+filesystem names cannot collide. Skill imports stay lazy — the
+library only loads when the model calls `load_skill`. Extension
+entry points resolve only when activated.
+
+> **Trust:** Entry-point plugins run arbitrary Python at import
+> time. Pyharness does not sandbox plugins. Trust comes from your
+> Python environment: `pip install` only what you trust.
+
+Activate from a named agent:
+
+```yaml
+extensions:
+  - acme-observability:cost-tracker
+skills:
+  - acme-finance-tools:sec-filings
+```
+
+Or programmatically:
+
+```python
+agent = CodingAgent(CodingAgentConfig(
+    workspace=ws,
+    extensions_enabled=["acme-observability:cost-tracker"],
+    skills_enabled=["acme-finance-tools:sec-filings"],
+))
+```
+
+Full guide: [docs/guides/plugins.md](../../docs/guides/plugins.md).
+
+---
+
+## Programmatic Use (SDK)
+
+`CodingAgent` is the public SDK class. The CLI is a thin wrapper
+around it.
+
+### Embed
 
 ```python
 import asyncio
@@ -166,10 +386,6 @@ from pathlib import Path
 from coding_harness import CodingAgent, CodingAgentConfig
 
 async def main() -> None:
-    # `workspace` is where the agent reads/writes files. With no
-    # `.pyharness/` anywhere up the tree, only personal config from
-    # `~/.pyharness/` (if any) applies. For a real domain harness, point
-    # `workspace` at your project directory or a child of it.
     agent = CodingAgent(CodingAgentConfig(
         workspace=Path("/tmp/scratch"),
         model="claude-opus-4-7",
@@ -184,53 +400,42 @@ asyncio.run(main())
 
 ```python
 handle = agent.start("deep research on X")
-await handle.steer("also check Y")
+await handle.steer("also check Y")    # injected at next turn boundary
 result = await handle.wait()
 ```
 
 ### Programmatic overlays
 
-`CodingAgentConfig` accepts overlays so embedders don't need to write
-files into `~/.pyharness/`. The filesystem still acts as the default
-discovery source; overlays are merged on top.
+`CodingAgentConfig` accepts overlays so embedders don't need to
+write files. Filesystem discovery still runs; overlays merge on top.
 
 ```python
-from coding_harness import (
-    CodingAgent, CodingAgentConfig,
-    SkillDefinition,
-)
+from coding_harness import CodingAgent, CodingAgentConfig, SkillDefinition
 from pyharness import ExtensionAPI
-
-# A skill defined in code, no filesystem entry.
-in_memory_skill = SkillDefinition(
-    name="my-skill",
-    description="What this skill does.",
-    body="When the model loads this skill, this body becomes instructions.",
-)
 
 def my_extension(api: ExtensionAPI) -> None:
     api.on("after_tool_call", lambda event, ctx: print(event.payload))
 
 agent = CodingAgent(CodingAgentConfig(
     workspace=Path("/tmp/scratch"),
-    extra_skills=[in_memory_skill],
-    extra_tools=[],                     # always-on Tool instances
-    extra_extensions=[my_extension],    # callables run with ExtensionAPI
 
-    # Override allowlists (None means "fall back to frontmatter / default").
+    # Programmatic skills / tools / extensions (additive on top of fs)
+    extra_skills=[SkillDefinition(name="my-skill", description="…", body="…")],
+    extra_tools=[],
+    extra_extensions=[my_extension],
+
+    # Allowlist overrides (None = fall back to frontmatter / default)
     extensions_enabled=["cost-tracker"],
     skills_enabled=["my-skill", "market-data"],
 ))
 ```
 
-### Subscribing to lifecycle events directly
+### Subscribing to events directly
 
-`agent.event_bus` is public — embedders attach handlers without
+`agent.event_bus` is public — embedders can attach handlers without
 defining an extension file:
 
 ```python
-agent = CodingAgent(...)
-
 async def trace(event, ctx):
     print(event.name, event.payload)
     return None
@@ -239,12 +444,13 @@ for kind in ("before_tool_call", "after_tool_call", "after_llm_call"):
     agent.event_bus.subscribe(kind, trace)
 ```
 
-### Multi-agent orchestration
+---
 
-`coding-harness` ships no `Pipeline` / `FanOut` framework. Compose
-`CodingAgent` instances in plain Python; see
-[`examples/orchestration/`](../../examples/orchestration/) for
-sequential, fan-out, and supervisor recipes. The single helper is:
+## Orchestration
+
+`coding-harness` ships **no** `Pipeline` / `FanOut` framework.
+Compose `CodingAgent` instances in plain Python. The single helper
+is `agent_workspace()`:
 
 ```python
 from coding_harness import agent_workspace
@@ -254,300 +460,149 @@ async with agent_workspace(base, "research", cleanup=False) as ws:
     await agent.run(...)
 ```
 
+See [`examples/orchestration/`](../../examples/orchestration/) for
+runnable recipes:
+
+- `pipeline.py` — sequential, agent A → artefact → agent B
+- `fanout.py` — parallel agents with reduce
+- `supervisor.py` — supervisor delegating to specialists via subprocess
+
+Full guide: [docs/guides/orchestration.md](../../docs/guides/orchestration.md).
+
 ---
 
-## Concepts (what each file convention means)
-
-### Workspace and config scopes
-
-- **Workspace** — the working directory for the agent. Chosen with
-  `--workspace` (CLI) or `CodingAgentConfig.workspace`. Defaults to
-  cwd. All file tools resolve relative paths against this.
-
-  Why a flag at all (Claude Code doesn't have one)? Because pyharness
-  is SDK-first: a server or orchestration script may run several
-  agents concurrently in one process, each operating on a different
-  directory. `os.chdir()` is process-global and races between async
-  tasks. A per-agent `workspace` parameter is the only safe way to
-  isolate file work.
-- **Project root** — the closest ancestor of the workspace containing
-  a `.pyharness/` directory. Discovered automatically by walking up
-  from `workspace`, stopping at `$HOME`. Internal lookup; you don't
-  pass this in.
-- **Two config scopes** for `.pyharness/<thing>` (settings, agents,
-  skills, tools, extensions):
-  1. **Personal** — `~/.pyharness/`
-  2. **Project** — `<project_root>/.pyharness/`
-
-  Most-general-first ordering means project overrides personal on
-  name collisions. There is no third "workspace" scope: if you want
-  workspace-local config, drop a `.pyharness/` in the workspace and
-  it becomes the project root automatically.
-- **AGENTS.md** is different — it's read from **every directory** on
-  the path from `~/` down to the workspace. Matches how Claude Code
-  walks `CLAUDE.md`. Nested guidance composes naturally: a small
-  `AGENTS.md` in a subdirectory layers on top of the repo-level one.
-
-### AGENTS.md
-
-Plain markdown at any directory on the path from `~/` down to the
-workspace. **Every** `AGENTS.md` on that path is concatenated into
-the system prompt in general-first order — not just at scope
-boundaries. So nested guidance composes naturally:
-
-```
-/home/user/AGENTS.md           ← personal  (always)
-/home/user/work/AGENTS.md      ← parent-of-projects guidance
-/home/user/work/repo/AGENTS.md ← repo-level (project root)
-/home/user/work/repo/src/AGENTS.md     ← subdirectory rules
-/home/user/work/repo/src/components/AGENTS.md ← subpackage rules
-```
-
-If your workspace is `/home/user/work/repo/src/components/`, all five
-files contribute to the system prompt, with the most-specific ones
-appearing last so they override the more-general ones.
-
-Lines starting with `@` are treated as **deferred imports** and are
-**not inlined** into the system prompt:
-
-```markdown
-# AGENTS.md
-
-Top-level guidance.
-
-@docs/architecture.md
-@~/notes/large-reference.md
-
-More guidance after the imports.
-```
-
-Each `@<path>` is replaced with a one-line pointer telling the agent
-"read this file on demand using the `read` tool." Imports are
-resolved relative to the AGENTS.md they appear in (or absolute via
-`~`). Unresolved paths pass through as plain text so broken
-references stay visible.
-
-### Named sub-agents
-
-Markdown files at `<scope>/.pyharness/agents/<name>.md`. YAML
-frontmatter declares:
-
-```yaml
----
-name: research-analyst
-description: Pulls market data and writes a daily summary.
-model: claude-opus-4-7        # optional; overrides the default
-tools:                         # optional non-builtin tools to pin always-on
-  - get_quote                  # comes from a skill module or .pyharness/tools/
-extensions:                    # OPT-IN; missing => no extensions activate
-  - cost-tracker
-  - kill-switch
-  - acme:pii-redactor          # entry-point plugin, namespaced as package:name
-skills:                        # allowlist for skills the agent can see
-  - market-data                # missing or ["*"] => all in scope
-workdir: ~/research            # optional default workspace
----
-
-You are a research analyst...   # body becomes the system prompt
-```
-
-Resolution semantics:
-
-- **`tools:`** — *additive over builtins*. Listing a builtin name is a
-  no-op; missing / empty / `["*"]` means "just builtins." Non-builtin
-  names must resolve against project tools (`.pyharness/tools/`) or
-  skill tool modules.
-- **`extensions:`** — strict allowlist. Missing field = no extensions
-  activate. Names match those returned by `discover_extensions()`,
-  including `package:name` for entry-point plugins.
-- **`skills:`** — allowlist for which skills appear in the prompt
-  index AND can be loaded via `load_skill`. Missing or `["*"]`
-  means "all in scope are visible."
-
-Discovered by `discover_agents()`; loaded by
-`load_agent_definition()`; tool list resolved by
-`resolve_tool_list()` against builtins → project tools → skill tools.
-
-### Skills
-
-On-demand capability bundles at
-`<scope>/.pyharness/skills/<name>/`. Layout:
-
-```
-.pyharness/skills/market-data/
-  SKILL.md      # frontmatter + body (instructions injected on load)
-  tools.py      # optional: module exposing `TOOLS = [...]`
-  hooks.py      # optional: module exposing `register(api)` (skill bundle)
-```
-
-Skills appear in the system prompt as a `<system-reminder>` block
-listing names + one-line descriptions. The agent calls the
-`load_skill` built-in tool when a description matches the task; that
-tool dynamically imports the skill's `tools.py`, registers its tools
-into the live registry, runs `hooks.py:register(api)` if present, and
-returns the SKILL.md body as instructions. Skills already loaded in
-the session are tracked on `LoadSkillTool.loaded_names` so the index
-can render a "Loaded" / "Available" split.
-
-Skill bundles (`hooks.py` next to `SKILL.md`) let a skill ship its
-own lifecycle hooks alongside its tools. Hooks register only when the
-skill is activated, so they don't leak into agents that never load
-the skill.
-
-### Plugin ecosystem (Python entry points)
-
-Skills and extensions can also be published by **pip-installed
-packages** via Python entry points. No filesystem layout needed.
-
-```toml
-# In a library's pyproject.toml
-[project.entry-points."pyharness.skills"]
-sec-filings = "acme.skills.sec_filings"     # dotted module path
-
-[project.entry-points."pyharness.extensions"]
-pii-redactor = "acme.extensions:register"   # dotted attribute
-```
-
-Entry-point plugins are auto-discovered by `discover_skills()` and
-`discover_extensions()` and namespaced as `<package>:<name>` (e.g.
-`acme:sec-filings`) to prevent collisions with filesystem entries
-or other libraries. Skills entry points are **lazy** — the library
-only imports when the model calls `load_skill`. Extensions, when
-named in frontmatter or `extensions_enabled`, import eagerly at
-session start.
-
-### Extensions
-
-Python modules at `<scope>/.pyharness/extensions/<name>.py` (or
-entry-point plugins; see above). Each exposes a top-level
-`register(api)` that subscribes to lifecycle events:
-
-```python
-from pyharness import ExtensionAPI, HookOutcome
-
-def register(api: ExtensionAPI) -> None:
-    api.on("before_tool_call", _gate)
-
-async def _gate(event, ctx):
-    if event.payload["tool_name"] == "bash":
-        return HookOutcome.deny("bash disabled in this project")
-    return HookOutcome.cont()
-```
-
-**Extensions are never auto-loaded.** Even if a `.py` file exists in
-`.pyharness/extensions/`, it stays dormant unless explicitly enabled
-via:
-
-- the named agent's frontmatter `extensions: [...]` list, or
-- `CodingAgentConfig.extensions_enabled=[...]` (programmatic), or
-- `CodingAgentConfig.extra_extensions=[fn, ...]` (a callable that
-  takes `ExtensionAPI`).
-
-`discover_extensions()` always returns the catalog (so a TUI or
-`pyharness list-extensions` can show what's available), but
-activation is opt-in by name.
-
-### Sessions
+## Sessions
 
 Every run writes a JSONL log to
 `~/.pyharness/sessions/<cwd-hash>/<session-id>.jsonl`. Each line is
-one Pydantic `AgentEvent` (`SessionStartEvent`,
-`AssistantMessageEvent`, `ToolCallEndEvent`, …). The log is the
-durable record. `Session.read_messages()` reconstructs the LLM
-transcript from it on resume.
+one Pydantic event (`SessionStartEvent`, `AssistantMessageEvent`,
+`ToolCallEndEvent`, …). The log is the durable record;
+`Session.read_messages()` reconstructs the LLM transcript on resume.
 
-## Configuration (`settings.json`)
-
-Locations, in merge order (later wins):
-
-1. `~/.pyharness/settings.json` (personal)
-2. `<project>/.pyharness/settings.json` (project)
-3. CLI flags
-
-Example:
-
-```json
-{
-  "default_model": "claude-opus-4-7",
-  "summarization_model": "claude-haiku-4-5",
-  "max_turns": 100,
-  "compaction_threshold_pct": 0.8,
-  "search_provider": "brave",
-  "search_api_key_env": "BRAVE_API_KEY",
-  "fetch_timeout_seconds": 30
-}
+```bash
+pyharness sessions ls
+pyharness sessions show <id>
+pyharness sessions replay <id>
 ```
 
-See `coding_harness.config.Settings` for the full set of keys and
-defaults.
+Resume / fork:
 
-## Built-in tools
+```bash
+pyharness --session <id> "continue with X"
+pyharness --fork <id> --at-event 12 "alternative path"
+```
+
+---
+
+## Built-in Tools
 
 | Tool | Notes |
-| --- | --- |
+|---|---|
 | `read`, `write`, `edit` | File I/O. `edit` requires unique-occurrence replacement. |
 | `bash` | Shell with a small list of catastrophic-pattern hard-blocks (`rm -rf /`, fork bombs, `dd` to block devices, …). |
 | `grep` | Regex search; uses `rg` if installed, falls back to a Python implementation. |
 | `glob` | Pathname pattern listing. |
-| `web_search` | Configurable provider (Brave / Tavily / Exa). Read API key from `settings.search_api_key_env`. |
-| `web_fetch` | HTTP GET with optional HTML extraction (requires the `extract` extra for trafilatura). |
+| `web_search` | Configurable provider (Brave / Tavily / Exa). API key from `settings.search_api_key_env`. |
+| `web_fetch` | HTTP GET with optional HTML extraction (requires `extract` extra for trafilatura). |
 | `load_skill` | Loads an on-demand skill by name; auto-registered. |
 
-## Examples
+Builtins are always registered. Frontmatter `tools:` *adds* to them,
+never replaces.
 
-Top-level `examples/` directory in the repo:
+---
 
-- `examples/agents/research-analyst.md` — a named agent definition.
-- `examples/extensions/cost_logger.py` — token-cost JSONL logger.
-- `examples/extensions/audit_logger.py` — per-tool audit log.
-- `examples/extensions/circuit_breaker.py` — env-var kill switch.
-- `examples/skills/market-data/` — skill scaffold.
-- `examples/orchestration/pipeline.py` — sequential multi-agent pipeline.
-- `examples/orchestration/fanout.py` — parallel agents with reduce.
-- `examples/orchestration/supervisor.py` — supervisor delegating via subprocess.
+## Philosophy
 
-## Using coding-harness for non-coding domains
+`coding-harness` is aggressively minimal so it doesn't dictate your
+workflow. Features other harnesses bake in can be built with
+[extensions](#extensions), [skills](#skills), or installed from
+third-party [plugins](#plugins).
 
-```python
-# Drive a finance agent from Python
-agent = CodingAgent(CodingAgentConfig(
-    workspace=Path("/finance"),
-    agent_name="research-analyst",
-))
-result = await agent.run("deep dive on AAPL")
-```
+**No in-loop sub-agents.** Multi-agent runs are subprocesses; the
+harness composes from the outside. See [orchestration recipes](../../examples/orchestration/).
 
-Or from the CLI:
+**No plan mode.** Plans hide work from the observability layer. The
+agent already structures its work via tool calls.
+
+**No `TodoWrite` tool.** Models manage plans by writing files like
+any other artefact.
+
+**No `MultiEdit`.** Single `edit` only — keeps the diff surface
+reviewable and the failure modes few.
+
+**No interactive permission prompts.** Tools execute or fail.
+Approval gates would block scheduled and SDK-driven runs. Build a
+gate as an extension.
+
+**No built-in MCP.** Out of scope for v1 — can ship as an extension.
+
+**No auto-loaded extensions.** Extensions affect the loop directly;
+auto-load would leak blast radius across roles. Opt in by name.
+
+See [`DESIGN.md`](../../DESIGN.md) for the full principles and
+explicit refusals list.
+
+---
+
+## CLI Reference
+
+### Modes
+
+| Flag | Description |
+|---|---|
+| (default) | Print final output to stdout |
+| `--json` | Stream events as JSONL on stdout |
+| `--bare` | Skip extensions, AGENTS.md, settings |
+| `--quiet` | Suppress non-final output |
+
+### Model and turns
+
+| Option | Description |
+|---|---|
+| `--model <id>` | Model id (overrides `settings.default_model`) |
+| `--max-turns <n>` | Maximum turns before forced stop |
+
+### Workspace and named agent
+
+| Option | Description |
+|---|---|
+| `--workspace <path>` | Operating directory (default: cwd) |
+| `--agent <name>` | Run as named agent at `.pyharness/agents/<name>.md` |
+
+### Sessions
+
+| Option | Description |
+|---|---|
+| `-c`, `--continue` | Continue most-recent session in cwd |
+| `-r`, `--recent` | List recent sessions for cwd |
+| `--session <id>` | Resume specific session |
+| `--fork <id>` | Fork session into a new one |
+| `--at-event <n>` | With `--fork`, fork at a specific event |
+| `pyharness sessions ls` | List recent sessions |
+| `pyharness sessions show <id>` | Print session JSONL |
+| `pyharness sessions replay <id>` | Pretty-print session events |
+
+### Examples
 
 ```bash
-pyharness --workspace /finance --agent research-analyst "deep dive on AAPL"
+# Read-only review with a non-default model
+pyharness --model claude-opus-4-7 "review src/ for unused imports"
+
+# Run a domain agent with a specific workspace
+pyharness --workspace /finance --agent analyst "deep dive on AAPL"
+
+# Fork and explore an alternative
+pyharness --fork 7d3a... --at-event 14 "what if we used numpy instead?"
 ```
 
-Full walkthroughs:
-[`build-finance-harness.md`](../../docs/guides/build-finance-harness.md),
-[`build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
+---
 
-## Public surface
+## See Also
 
-```python
-from coding_harness import (
-    # main entry points
-    CodingAgent, CodingAgentConfig, BASE_SYSTEM_PROMPT,
-    # configuration
-    Settings, WorkspaceContext,
-    # named sub-agents
-    AgentDefinition,
-    discover_agents, load_agent_definition, resolve_tool_list,
-    list_known_tool_names,
-    # skills
-    SkillDefinition, LoadSkillTool, LoadSkillResult,
-    discover_skills, build_skill_index,
-    # extensions
-    AvailableExtensions, LoadedExtensions,
-    discover_extensions, load_extensions,
-    # built-in tools
-    all_builtin_tools, builtin_registry, builtin_tool_names,
-    # orchestration helper
-    agent_workspace,
-)
-```
+- [`pyharness-sdk`](../pyharness-sdk/) — the kernel this builds on
+- [`tui`](../tui/) — minimal interactive shell
+- [`DESIGN.md`](../../DESIGN.md) — principles and refusals
+- [docs/guides/build-finance-harness.md](../../docs/guides/build-finance-harness.md)
+- [docs/guides/build-autoresearch-harness.md](../../docs/guides/build-autoresearch-harness.md)
+- [docs/guides/plugins.md](../../docs/guides/plugins.md)
+- [docs/guides/orchestration.md](../../docs/guides/orchestration.md)

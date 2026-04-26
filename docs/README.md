@@ -1,38 +1,26 @@
 # pi-py docs
 
-Long-form guides that don't fit in package READMEs.
+Long-form material that doesn't fit in package READMEs.
 
 ## Guides
 
-- [**Building a finance harness on pyharness-sdk**](guides/build-finance-harness.md)
-  — end-to-end walkthrough of building a domain-specific harness
-  for trading / portfolio analysis on the kernel. Tools, settings,
-  risk-check extension, assembly layer, CLI.
-- [**Building an autoresearch harness on pyharness-sdk**](guides/build-autoresearch-harness.md)
-  — same recipe applied to long-horizon research. Disk-as-truth for
-  notes and plan files, citation auditing, time budgets, multi-agent
-  via subprocesses.
-- [**Plugins: skills and extensions from Python packages**](guides/plugins.md)
-  — publish skills (`pyharness.skills` entry points) and extensions
-  (`pyharness.extensions` entry points) from a pip-installed
-  library. Namespacing, lazy imports, activation rules, trust model.
-- [**Orchestration patterns**](guides/orchestration.md)
-  — sequential pipelines, fan-out, supervisor / specialist via
-  subprocess. Recipes you copy, not a framework.
+| Guide | What |
+|---|---|
+| [Building a finance harness](guides/build-finance-harness.md) | End-to-end recipe for a domain harness. 30–50 tools, 5 named agents, orchestrated morning routine, eval suite, feedback loop. |
+| [Building an autoresearch harness](guides/build-autoresearch-harness.md) | Same recipe applied to long-horizon research. Disk-as-truth for notes and plan files, citation auditing, time budgets, multi-agent via subprocesses. |
+| [Plugins](guides/plugins.md) | Publish skills and extensions from a pip-installed library via Python entry points (`pyharness.skills`, `pyharness.extensions`). Namespacing, lazy imports, activation rules, trust model. |
+| [Orchestration](guides/orchestration.md) | Sequential pipelines, fan-out, supervisor / specialist via subprocess. Plain Python recipes, not a framework. |
 
-Both guides are recipes. Read them alongside
+Both build guides are recipes. Read them alongside
 [`packages/coding-harness/`](../packages/coding-harness/) — the
 in-tree worked example whose source you can read as the reference
 implementation.
 
 ## Reference
 
-- [`packages/pyharness-sdk/README.md`](../packages/pyharness-sdk/README.md)
-  — kernel API, the loop diagram, lifecycle events, public surface.
-- [`packages/coding-harness/README.md`](../packages/coding-harness/README.md)
-  — what `pyharness "task"` actually does, file conventions,
-  built-in tools.
-- [`packages/tui/README.md`](../packages/tui/README.md) — the
-  minimal REPL.
-- [`../DESIGN.md`](../DESIGN.md) — design principles, the explicit
-  refusals list, architecture overview.
+| Doc | What |
+|---|---|
+| [`DESIGN.md`](../DESIGN.md) | Design principles, the explicit refusals list, architecture overview |
+| [`packages/coding-harness/README.md`](../packages/coding-harness/README.md) | What `pyharness "task"` actually does, file conventions, every CLI flag, SDK API |
+| [`packages/pyharness-sdk/README.md`](../packages/pyharness-sdk/README.md) | Kernel API, the loop diagram, lifecycle events |
+| [`packages/tui/README.md`](../packages/tui/README.md) | The minimal REPL |
