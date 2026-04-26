@@ -18,17 +18,29 @@ extension, not in core."
    layer. The context window is working memory.
 5. **Two ways to be an agent: place-based and name-based.** Both are
    first-class. Workspace is decoupled from identity.
-6. **Always-on tools vs conditional skills.** Routine tools are declared
-   in agent frontmatter at session start. Skills are reserved for
-   genuinely conditional capabilities loaded on demand.
-7. **Multi-agent through process spawning.** No in-loop sub-agent
+6. **Always-on tools vs conditional skills.** Builtins are always
+   registered. Routine non-builtin tools are pinned in agent frontmatter
+   `tools:` (additive over builtins). Skills are reserved for genuinely
+   conditional capabilities loaded on demand via `load_skill`.
+7. **Extensions are opt-in, never auto-loaded.** Discovery surfaces a
+   catalog (filesystem + Python entry points). Activation requires an
+   explicit name in frontmatter `extensions:`, programmatic
+   `extensions_enabled`, or a CLI flag. Filesystem presence alone never
+   triggers `register(api)`.
+8. **Multi-agent through process spawning.** No in-loop sub-agent
    delegation. Sub-agents are subprocess invocations.
-8. **Three scopes with hierarchical composition.** Personal
+9. **Three scopes with hierarchical composition.** Personal
    (`~/.pyharness/`), project (`<project>/.pyharness/`), workspace (the
    directory).
-9. **Standard formats from Claude Code; semantics from pi.** Frontmatter
-   format is Claude Code-compatible; runtime semantics follow pi.
-10. **Build the minimum that ships; defer features until concrete need
+10. **Plugin ecosystem via Python entry points.** Pip-installed
+    libraries publish skills (`pyharness.skills`) and extensions
+    (`pyharness.extensions`) without writing into `~/.pyharness/`.
+    Namespaced as `<package>:<name>`. No bespoke plugin manifest, no
+    install command.
+11. **Standard formats from Claude Code; semantics from pi.** Frontmatter
+    format is Claude Code-compatible (incl. SKILL.md and `<system-reminder>`
+    skill index injection); runtime semantics follow pi.
+12. **Build the minimum that ships; defer features until concrete need
     appears.**
 
 ## Explicit refusals
@@ -67,6 +79,13 @@ requires one, it lands as an extension, not as core code.
 - **Custom slash commands.** We are headless; there is no command line.
 - **MCP support.** Out of scope for v1. The tool ABC is local Python;
   MCP can ship as an extension later.
+- **Plugin trust / sandboxing.** Entry-point plugins run arbitrary
+  Python at import time. We rely on pip's install boundary; we do
+  not gate plugins behind an allow list or signature check in v1.
+- **Mid-run extension toggle.** Extensions are bound at session start
+  only. Disabling mid-run would leave dangling tool references and
+  partial-effect state. If a kill switch is needed, ship it as an
+  extension that gates other extensions internally.
 
 ## Architecture
 
@@ -150,25 +169,38 @@ autoresearch harness.
 
 - **`coding_agent.py`** — `CodingAgent`, `CodingAgentConfig`, the
   `BASE_SYSTEM_PROMPT`. The assembly layer: `__init__` reads
-  settings → resolves the named agent (or falls back to all
-  built-ins) → discovers skills → registers `load_skill` →
-  renders the system prompt → builds the `EventBus` and loads
-  extensions → maps `Settings` to `AgentOptions` → instantiates
-  `pyharness.Agent`.
+  settings → resolves the named agent (always registers builtins
+  plus any frontmatter-pinned non-builtin tools) → discovers skills
+  (filesystem + entry points) → applies the `skills:` allowlist and
+  `extra_skills` overlays → registers `load_skill` → renders the
+  system prompt (with AGENTS.md `@import` lines deferred and the
+  skill index as a `<system-reminder>` block) → builds the
+  `EventBus`, discovers extensions, and activates only those
+  explicitly enabled (named-agent frontmatter, `extensions_enabled`,
+  or `extra_extensions` callables) → maps `Settings` to
+  `AgentOptions` → instantiates `pyharness.Agent`. SDK overlays
+  (`extra_skills`, `extra_tools`, `extra_extensions`) let embedders
+  inject capabilities without writing files.
 - **`config.py`** — `Settings` Pydantic model loaded from personal +
   project + CLI overrides.
 - **`workspace.py`** — discovers project root (nearest ancestor with
-  `.pyharness/`), walks AGENTS.md in most-general-first order, and
-  collects `<scope>/.pyharness/{agents,skills,tools,extensions}`
-  dirs.
+  `.pyharness/`), walks AGENTS.md in most-general-first order
+  (rewriting `@<path>` lines as deferred-read pointers instead of
+  inlining their content), and collects
+  `<scope>/.pyharness/{agents,skills,tools,extensions}` dirs.
 - **`agents.py`** — frontmatter parser, agent discovery, tool
   resolution. Resolves declared tool names against builtins → project
   tools → skill tools.
-- **`skills.py`** — `SkillDefinition`, discovery, the `load_skill`
-  built-in tool.
-- **`extensions_loader.py`** — file walker that imports each
-  `<scope>/.pyharness/extensions/<name>.py` and calls its
-  `register(api)`.
+- **`skills.py`** — `SkillDefinition`, discovery (filesystem
+  bundles plus `pyharness.skills` entry points), `build_skill_index`
+  rendering as a `<system-reminder>` block with loaded/available
+  split, and the `load_skill` built-in tool. Skill bundles
+  (`SKILL.md` + `tools.py` + `hooks.py`) let a skill ship its own
+  lifecycle hooks; the hooks register only when the skill activates.
+- **`extensions_loader.py`** — discovers the catalog of available
+  extensions (filesystem walk of `<scope>/.pyharness/extensions/` plus
+  `pyharness.extensions` entry points) and imports/activates only the
+  names in the enabled set. **Extensions are never auto-loaded.**
 - **`_loader.py`** — shared dynamic-import helper for tools and skill
   modules.
 - **`tools/builtin/`** — the eight defaults: `read`, `write`, `edit`,
@@ -202,6 +234,13 @@ non-Continue outcome wins.
 - **Frontmatter format** — Claude Code's agent + skill markdown shape.
   We don't borrow Claude Code's runtime: no plan mode, no TodoWrite, no
   Task tool, no MultiEdit, no permission modes.
+- **Skills as prompt-injected metadata** — Anthropic's emerging
+  SKILL.md / Skills convention: progressive disclosure via a
+  `<system-reminder>` block listing names + descriptions, body and
+  tools materialised only when the model invokes `load_skill`.
+- **Plugin namespacing** — `<package>:<name>` prefix mirrors Claude
+  Code's `<plugin>:<skill-name>` shape. Implemented via Python
+  entry points so pip is the install mechanism.
 - **Runtime semantics** — pi's loop shape (drain queues at the top of
   the turn, steering between tool calls, follow-up between turns) and
   pi's preference for files-as-truth and JSONL logs.

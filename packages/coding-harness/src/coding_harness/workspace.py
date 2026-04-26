@@ -158,9 +158,55 @@ class WorkspaceContext:
         return results
 
     def render_agents_md(self) -> str:
-        """Convenience: concatenate all AGENTS.md content with separators."""
+        """Concatenate all AGENTS.md content. Lines starting with ``@`` are
+        treated as deferred imports and replaced with a one-line pointer
+        instead of being inlined — so big reference docs can live outside
+        the system prompt and be read on demand by the agent."""
 
         parts: list[str] = []
         for path, content in self.collect_agents_md():
-            parts.append(f"# Guidance from {path}\n\n{content.strip()}")
+            rendered = self._rewrite_imports(path, content)
+            parts.append(f"# Guidance from {path}\n\n{rendered.strip()}")
         return "\n\n".join(parts)
+
+    def _rewrite_imports(self, base: Path, content: str) -> str:
+        """Replace ``@<path>`` lines with a deferred-read pointer.
+
+        Recognised forms (per line, leading whitespace allowed):
+        - ``@path/to/file.md``
+        - ``@./relative.md``
+        - ``@~/absolute.md``
+        Other lines pass through unchanged.
+        """
+
+        out: list[str] = []
+        for line in content.splitlines():
+            stripped = line.lstrip()
+            if not stripped.startswith("@"):
+                out.append(line)
+                continue
+            # Tokens after the leading @ up to the first space, if any.
+            ref = stripped[1:].split(maxsplit=1)[0]
+            if not ref or ref.startswith("@"):
+                out.append(line)
+                continue
+            resolved = self._resolve_import(base.parent, ref)
+            if resolved is None:
+                out.append(line)
+                continue
+            indent = line[: len(line) - len(stripped)]
+            out.append(
+                f"{indent}- (Reference document available at `{resolved}` — read it on demand using the `read` tool.)"
+            )
+        return "\n".join(out)
+
+    def _resolve_import(self, base_dir: Path, ref: str) -> Path | None:
+        try:
+            ref_path = Path(ref).expanduser()
+        except Exception:
+            return None
+        if not ref_path.is_absolute():
+            ref_path = (base_dir / ref_path).resolve()
+        else:
+            ref_path = ref_path.resolve()
+        return ref_path if ref_path.is_file() else None

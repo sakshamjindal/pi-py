@@ -12,6 +12,13 @@ Long-form guides that don't fit in package READMEs.
   — same recipe applied to long-horizon research. Disk-as-truth for
   notes and plan files, citation auditing, time budgets, multi-agent
   via subprocesses.
+- [**Plugins: skills and extensions from Python packages**](guides/plugins.md)
+  — publish skills (`pyharness.skills` entry points) and extensions
+  (`pyharness.extensions` entry points) from a pip-installed
+  library. Namespacing, lazy imports, activation rules, trust model.
+- [**Orchestration patterns**](guides/orchestration.md)
+  — sequential pipelines, fan-out, supervisor / specialist via
+  subprocess. Recipes you copy, not a framework.
 
 Both guides are recipes. Read them alongside
 [`packages/coding-harness/`](../packages/coding-harness/) — the

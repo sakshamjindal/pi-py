@@ -75,18 +75,18 @@ The project layout:
 
 ```
 /your-project/
-  AGENTS.md                              # domain philosophy
+  AGENTS.md                              # domain philosophy (supports `@import` for big refs)
   .pyharness/
     settings.json                        # model defaults, cost caps, domain-specific keys
     agents/                              # named agent definitions
-      analyst.md                         # frontmatter: name, model, tools list; body: system prompt
+      analyst.md                         # frontmatter: name, model, tools, extensions, skills; body: system prompt
       reviewer.md
     tools/                               # domain tools (Python modules with TOOLS = [...])
       market_data.py                     # get_quote, get_fundamentals, ...
       proposals.py                       # propose_trade, flag_for_review, ...
     skills/                              # on-demand capability bundles
-      options-analysis/{SKILL.md, tools.py}
-    extensions/                          # lifecycle hooks
+      options-analysis/                  # SKILL.md + tools.py + (optional) hooks.py
+    extensions/                          # opt-in lifecycle hooks (must be named in frontmatter)
       audit_logger.py                    # register(api) -> subscribe to events
       circuit_breaker.py
   workflows/                             # orchestration: plain Python driving CodingAgent
@@ -117,6 +117,12 @@ Full worked examples:
   30-50 tools, 5 agents, orchestrated morning routine, eval suite, feedback loop.
 - **Autoresearch:** [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md) —
   research tools, literature review / synthesis / experiment agents, iterative research loop.
+- **Plugins:** [`docs/guides/plugins.md`](docs/guides/plugins.md) —
+  publish skills and extensions from a pip-installed library via
+  Python entry points (`pyharness.skills`, `pyharness.extensions`).
+- **Orchestration:** [`docs/guides/orchestration.md`](docs/guides/orchestration.md) —
+  pipelines, fan-out, and supervisor patterns. Plain Python recipes,
+  no framework.
 
 → Conventions, per-feature docs:
 [`packages/coding-harness/README.md`](packages/coding-harness/README.md)
