@@ -29,9 +29,13 @@ extension, not in core."
    triggers `register(api)`.
 8. **Multi-agent through process spawning.** No in-loop sub-agent
    delegation. Sub-agents are subprocess invocations.
-9. **Three scopes with hierarchical composition.** Personal
-   (`~/.pyharness/`), project (`<project>/.pyharness/`), workspace (the
-   directory).
+9. **Two config scopes, one operating directory.** Personal
+   (`~/.pyharness/`) and project (`<closest ancestor with .pyharness/>/.pyharness/`).
+   The "workspace" is just where the agent operates — it is **not** a
+   third config scope. AGENTS.md, in contrast, is read from every
+   ancestor on the path from home down to workspace (matching Claude
+   Code's CLAUDE.md walk and how every repo-aware tool composes
+   hierarchical config).
 10. **Plugin ecosystem via Python entry points.** Pip-installed
     libraries publish skills (`pyharness.skills`) and extensions
     (`pyharness.extensions`) without writing into `~/.pyharness/`.

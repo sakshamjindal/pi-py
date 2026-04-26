@@ -96,3 +96,69 @@ def test_collect_extensions_dirs(tmp_path):
     dirs = ctx.collect_extensions_dirs()
     assert dirs[0] == home / ".pyharness" / "extensions"
     assert dirs[-1] == project / ".pyharness" / "extensions"
+
+
+def test_collect_agents_md_walks_every_ancestor(tmp_path):
+    """An AGENTS.md at any directory between home and workspace must be
+    picked up — not just at home, project root, and workspace."""
+
+    home = tmp_path / "home"
+    middle = home / "work"
+    project = middle / "repo"
+    src = project / "src"
+    components = src / "components"
+    components.mkdir(parents=True)
+    (project / ".pyharness").mkdir()
+
+    (home / "AGENTS.md").write_text("home", encoding="utf-8")
+    (middle / "AGENTS.md").write_text("middle", encoding="utf-8")  # between home & project
+    (project / "AGENTS.md").write_text("project", encoding="utf-8")
+    (src / "AGENTS.md").write_text("src", encoding="utf-8")  # between project & workspace
+    (components / "AGENTS.md").write_text("components", encoding="utf-8")
+
+    ctx = WorkspaceContext(workspace=components, home=home)
+    contents = [c for _, c in ctx.collect_agents_md()]
+    # Every ancestor's AGENTS.md is captured, in general-first order.
+    assert contents == ["home", "middle", "project", "src", "components"]
+
+
+def test_collect_agents_md_workspace_outside_home(tmp_path):
+    """Workspace outside $HOME still picks up ~/AGENTS.md (personal
+    guidance) plus any ancestor AGENTS.md from / down to workspace."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "AGENTS.md").write_text("home", encoding="utf-8")
+
+    workspace = tmp_path / "scratch" / "work"
+    workspace.mkdir(parents=True)
+    (workspace / "AGENTS.md").write_text("workspace", encoding="utf-8")
+
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    contents = [c for _, c in ctx.collect_agents_md()]
+    assert "home" in contents and "workspace" in contents
+    # Personal guidance always comes first.
+    assert contents[0] == "home"
+
+
+def test_no_third_workspace_scope_for_pyharness_dirs(tmp_path):
+    """A `.pyharness/` at the workspace level (deeper than the project
+    root) does NOT count as a separate scope. The closest ancestor with
+    `.pyharness/` is the project root, period."""
+
+    home = tmp_path / "home"
+    project = home / "repo"
+    workspace = project / "src"
+    workspace.mkdir(parents=True)
+
+    (project / ".pyharness" / "extensions").mkdir(parents=True)
+    # If someone puts a ".pyharness/" at workspace level deeper than the
+    # discovered project root, it doesn't contribute a third scope.
+    # (In practice it would be picked up by discover_project_root if the
+    # walk reached it FIRST — i.e. workspace would BECOME the project
+    # root. That's the intended behavior.)
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    dirs = ctx.collect_extensions_dirs()
+    # Only personal + project; no third entry.
+    assert len(dirs) <= 2
+    assert all(d != workspace / ".pyharness" / "extensions" for d in dirs)

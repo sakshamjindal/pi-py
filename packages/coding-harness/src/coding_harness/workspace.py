@@ -1,10 +1,17 @@
 """Hierarchical workspace context.
 
-Three scopes compose: personal (~/.pyharness/), project
-(<project>/.pyharness/, discovered by walking up from the workspace), and
-workspace (the directory itself). All scope-aware lookups return paths in
-"most general first" order (home → project → workspace) so concatenation
-"just works" for things like AGENTS.md.
+One operating directory (``workspace``) with two config scopes:
+
+- **Personal** — ``~/.pyharness/`` (always)
+- **Project** — ``<closest ancestor with .pyharness/>/.pyharness/`` (if any)
+
+``project_root`` is just the discovered ancestor — an internal lookup
+result, not a separate user-supplied path.
+
+For AGENTS.md, every directory on the path from ``~/`` down to
+``workspace`` is scanned, picking up an ``AGENTS.md`` at any level
+(matching Claude Code's CLAUDE.md walk). General-first ordering means
+the more-specific files override the more-general ones when concatenated.
 """
 
 from __future__ import annotations
@@ -32,14 +39,14 @@ class WorkspaceContext:
             self.project_root = Path(self.project_root).expanduser().resolve()
 
     # ------------------------------------------------------------------
-    # Scope discovery
+    # Project root discovery
     # ------------------------------------------------------------------
 
     def discover_project_root(self) -> Path | None:
-        """Walk up from workspace looking for a `.pyharness/` directory.
+        """Walk up from ``workspace`` looking for a ``.pyharness/`` directory.
 
-        Returns the first ancestor (or the workspace itself) that has a
-        `.pyharness/` subdirectory. Stops at the home directory so personal
+        Returns the closest ancestor (or the workspace itself) that has
+        a ``.pyharness/`` subdirectory. Stops at ``$HOME`` so personal
         config never registers as a project root.
         """
 
@@ -57,28 +64,53 @@ class WorkspaceContext:
             current = current.parent
 
     # ------------------------------------------------------------------
-    # AGENTS.md
+    # AGENTS.md — walks every ancestor of workspace
     # ------------------------------------------------------------------
 
     def collect_agents_md(self) -> list[tuple[Path, str]]:
-        """Collect AGENTS.md files in most-general-first order.
+        """Collect AGENTS.md files at every directory from home down to
+        workspace, general-first.
 
-        Returns a list of `(path, content)` pairs ordered home → project →
-        workspace so concatenation produces the right precedence.
+        Every ``AGENTS.md`` on the path contributes — not just the ones
+        at scope boundaries. This matches how Claude Code walks
+        ``CLAUDE.md`` and how most repo-aware tools (git, pytest)
+        compose hierarchical config.
         """
 
         results: list[tuple[Path, str]] = []
         seen: set[Path] = set()
-        for scope in self._scope_dirs_general_to_specific():
-            md = scope / "AGENTS.md"
+        for d in self._ancestor_chain():
+            md = d / "AGENTS.md"
             if md not in seen and md.is_file():
                 with contextlib.suppress(OSError):
                     results.append((md, md.read_text(encoding="utf-8")))
                 seen.add(md)
         return results
 
+    def _ancestor_chain(self) -> list[Path]:
+        """Directories from home down to workspace, general-first.
+
+        - Always includes ``~/`` for personal AGENTS.md.
+        - Then includes every ancestor of workspace from there down.
+        - If workspace lives outside ``$HOME``, ``~/`` is still prepended.
+        """
+
+        chain: list[Path] = []
+        current = self.workspace
+        while True:
+            chain.append(current)
+            if self.home is not None and current == self.home:
+                break
+            if current.parent == current:
+                break
+            current = current.parent
+        chain.reverse()
+        if self.home is not None and self.home not in chain:
+            chain.insert(0, self.home)
+        return chain
+
     # ------------------------------------------------------------------
-    # Skills, extensions, tools, agent definitions
+    # .pyharness/ scope dirs (skills, extensions, tools, agents, settings)
     # ------------------------------------------------------------------
 
     def collect_skills_dirs(self) -> list[Path]:
@@ -94,18 +126,16 @@ class WorkspaceContext:
         return self._collect_subdirs(".pyharness/agents")
 
     def collect_settings_files(self) -> list[Path]:
-        """Settings files in most-general-first order. Workspace-level
-        settings file is *not* part of this list — only personal and
-        project — to match the spec's two-level config hierarchy."""
+        """Settings files in most-general-first order: personal then project."""
 
         files: list[Path] = []
         if self.home is not None:
             personal = self.home / ".pyharness" / "settings.json"
             if personal.is_file():
                 files.append(personal)
-        if self.project_root is not None:
+        if self.project_root is not None and self.project_root != self.home:
             project = self.project_root / ".pyharness" / "settings.json"
-            if project.is_file() and project != (files[0] if files else None):
+            if project.is_file() and (not files or project != files[0]):
                 files.append(project)
         return files
 
@@ -113,31 +143,14 @@ class WorkspaceContext:
     # Internals
     # ------------------------------------------------------------------
 
-    def _scope_dirs_general_to_specific(self) -> list[Path]:
-        """Return scope directories in most-general-first order.
-
-        For AGENTS.md we want plain directories: the home dir itself, then
-        the project root, then the workspace.
-        """
-
-        out: list[Path] = []
-        if self.home is not None:
-            out.append(self.home)
-        if self.project_root is not None and self.project_root != self.home:
-            out.append(self.project_root)
-        if self.workspace != self.project_root and self.workspace != self.home:
-            out.append(self.workspace)
-        # Deduplicate while preserving order.
-        seen: set[Path] = set()
-        deduped: list[Path] = []
-        for p in out:
-            if p not in seen:
-                deduped.append(p)
-                seen.add(p)
-        return deduped
-
     def _collect_subdirs(self, suffix: str) -> list[Path]:
-        """Return `<scope>/<suffix>` directories that exist, general first."""
+        """Return ``<scope>/<suffix>`` directories that exist, general first.
+
+        Two scopes only: personal (``~``) and project (the discovered
+        ancestor with ``.pyharness/``). The workspace is never a scope of
+        its own — if you want workspace-local config, put ``.pyharness/``
+        in the workspace and it becomes the project root automatically.
+        """
 
         results: list[Path] = []
         seen: set[Path] = set()
@@ -146,16 +159,16 @@ class WorkspaceContext:
             bases.append(self.home)
         if self.project_root is not None and self.project_root != self.home:
             bases.append(self.project_root)
-        # Workspace-level extensions/skills/tools/agents are also valid;
-        # they sit at <workspace>/.pyharness/<suffix>.
-        if self.workspace != self.project_root and self.workspace != self.home:
-            bases.append(self.workspace)
         for base in bases:
             d = base / suffix
             if d.is_dir() and d not in seen:
                 results.append(d)
                 seen.add(d)
         return results
+
+    # ------------------------------------------------------------------
+    # AGENTS.md rendering — same `@import` deferred-read behavior
+    # ------------------------------------------------------------------
 
     def render_agents_md(self) -> str:
         """Concatenate all AGENTS.md content. Lines starting with ``@`` are
@@ -185,7 +198,6 @@ class WorkspaceContext:
             if not stripped.startswith("@"):
                 out.append(line)
                 continue
-            # Tokens after the leading @ up to the first space, if any.
             ref = stripped[1:].split(maxsplit=1)[0]
             if not ref or ref.startswith("@"):
                 out.append(line)

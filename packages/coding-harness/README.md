@@ -38,10 +38,12 @@ $ pyharness "fix the failing tests"
 
 2.  CodingAgent(config) — the assembly layer. In __init__:
        │
-       ├─ WorkspaceContext(workspace, project_root)
-       │     finds the project root by walking up looking for
-       │     .pyharness/, computes home + workspace + project
-       │     scopes.
+       ├─ WorkspaceContext(workspace)
+       │     walks UP from workspace looking for `.pyharness/` to
+       │     find the project root (or None). Two config scopes:
+       │     ~/.pyharness/ and <project_root>/.pyharness/. AGENTS.md
+       │     is collected from EVERY directory on the path from ~/
+       │     down to workspace, general-first.
        │
        ├─ Settings.load(workspace, project_root, cli_overrides)
        │     reads ~/.pyharness/settings.json + <project>/.pyharness/
@@ -68,8 +70,8 @@ $ pyharness "fix the failing tests"
        │     tools to mutate the registry on demand).
        │
        ├─ _build_system_prompt()
-       │     BASE_SYSTEM_PROMPT + AGENTS.md (from home → project →
-       │     workspace, with @import lines NOT inlined) + agent body
+       │     BASE_SYSTEM_PROMPT + AGENTS.md (every ancestor's, general-
+       │     first, with @import lines NOT inlined) + agent body
        │     (if named) + skill index rendered as a <system-reminder>
        │     block.
        │
@@ -164,6 +166,10 @@ from pathlib import Path
 from coding_harness import CodingAgent, CodingAgentConfig
 
 async def main() -> None:
+    # `workspace` is where the agent reads/writes files. With no
+    # `.pyharness/` anywhere up the tree, only personal config from
+    # `~/.pyharness/` (if any) applies. For a real domain harness, point
+    # `workspace` at your project directory or a child of it.
     agent = CodingAgent(CodingAgentConfig(
         workspace=Path("/tmp/scratch"),
         model="claude-opus-4-7",
@@ -252,32 +258,54 @@ async with agent_workspace(base, "research", cleanup=False) as ws:
 
 ## Concepts (what each file convention means)
 
-### Workspace, project root, scopes
+### Workspace and config scopes
 
 - **Workspace** — the working directory for the agent. Chosen with
   `--workspace` (CLI) or `CodingAgentConfig.workspace`. Defaults to
   cwd. All file tools resolve relative paths against this.
-- **Project root** — the nearest ancestor of the workspace
-  containing a `.pyharness/` directory. Discovered by
-  `WorkspaceContext.discover_project_root()` walking up from the
-  workspace, stopping at `$HOME`.
-- **Three scopes**, in most-general-first order:
+
+  Why a flag at all (Claude Code doesn't have one)? Because pyharness
+  is SDK-first: a server or orchestration script may run several
+  agents concurrently in one process, each operating on a different
+  directory. `os.chdir()` is process-global and races between async
+  tasks. A per-agent `workspace` parameter is the only safe way to
+  isolate file work.
+- **Project root** — the closest ancestor of the workspace containing
+  a `.pyharness/` directory. Discovered automatically by walking up
+  from `workspace`, stopping at `$HOME`. Internal lookup; you don't
+  pass this in.
+- **Two config scopes** for `.pyharness/<thing>` (settings, agents,
+  skills, tools, extensions):
   1. **Personal** — `~/.pyharness/`
   2. **Project** — `<project_root>/.pyharness/`
-  3. **Workspace** — `<workspace>/.pyharness/` (if different from
-     project root)
 
-  All scope-aware lookups (AGENTS.md, settings, agents, skills,
-  tools, extensions) walk the scopes general-first so concatenation
-  produces the right precedence (more-specific overrides
-  less-specific).
+  Most-general-first ordering means project overrides personal on
+  name collisions. There is no third "workspace" scope: if you want
+  workspace-local config, drop a `.pyharness/` in the workspace and
+  it becomes the project root automatically.
+- **AGENTS.md** is different — it's read from **every directory** on
+  the path from `~/` down to the workspace. Matches how Claude Code
+  walks `CLAUDE.md`. Nested guidance composes naturally: a small
+  `AGENTS.md` in a subdirectory layers on top of the repo-level one.
 
 ### AGENTS.md
 
-Plain markdown at any scope's `AGENTS.md`. Concatenated into the
-system prompt by `WorkspaceContext.render_agents_md()` in
-home → project → workspace order. Use it for repo-specific
-guidelines (style, conventions, do-nots).
+Plain markdown at any directory on the path from `~/` down to the
+workspace. **Every** `AGENTS.md` on that path is concatenated into
+the system prompt in general-first order — not just at scope
+boundaries. So nested guidance composes naturally:
+
+```
+/home/user/AGENTS.md           ← personal  (always)
+/home/user/work/AGENTS.md      ← parent-of-projects guidance
+/home/user/work/repo/AGENTS.md ← repo-level (project root)
+/home/user/work/repo/src/AGENTS.md     ← subdirectory rules
+/home/user/work/repo/src/components/AGENTS.md ← subpackage rules
+```
+
+If your workspace is `/home/user/work/repo/src/components/`, all five
+files contribute to the system prompt, with the most-specific ones
+appearing last so they override the more-general ones.
 
 Lines starting with `@` are treated as **deferred imports** and are
 **not inlined** into the system prompt:
