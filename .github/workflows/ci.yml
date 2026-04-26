@@ -47,7 +47,7 @@ jobs:
       - name: Install workspace (editable)
         run: |
           pip install -e packages/pyharness-sdk \
-                      -e packages/harness \
+                      -e packages/coding-harness \
                       -e packages/tui \
                       -e ".[dev]"
       - name: Run tests

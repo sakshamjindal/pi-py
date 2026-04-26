@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pyharness-workspace"
+name = "pi-py"
 version = "0.1.0"
-description = "Workspace shell for the pyharness monorepo (pyharness-sdk, harness, tui)."
+description = "pi-py workspace: an embeddable Python agent harness primitive (pyharness-sdk) plus a reference coding harness (coding-harness) and a stdlib REPL (pyharness-tui)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "pyharness contributors" }]
+authors = [{ name = "pi-py contributors" }]
 
 [project.optional-dependencies]
 dev = [
@@ -27,7 +27,7 @@ include = ["_workspace_root_no_packages"]
 asyncio_mode = "auto"
 testpaths = [
     "packages/pyharness-sdk/tests",
-    "packages/harness/tests",
+    "packages/coding-harness/tests",
     "packages/tui/tests",
 ]
 
@@ -63,7 +63,7 @@ ignore = [
 "examples/**" = ["F401", "B"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["pyharness", "harness", "pyharness_tui"]
+known-first-party = ["pyharness", "coding_harness", "pyharness_tui"]
 
 [tool.ruff.format]
 docstring-code-format = false

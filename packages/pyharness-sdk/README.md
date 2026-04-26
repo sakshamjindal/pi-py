@@ -29,11 +29,11 @@ folded in.
 
 ## What's NOT here (deliberately)
 
-- No built-in tools — those live in `harness`.
+- No built-in tools — those live in `coding-harness`.
 - No `settings.json` loader — you pass `AgentOptions` yourself.
 - No `AGENTS.md` walking — the system prompt is whatever you hand in.
 - No named sub-agents, no skills loader, no extension file
-  discovery — those are application concerns in `harness`.
+  discovery — those are application concerns in `coding-harness`.
 - No CLI.
 
 This is the kernel. Anything that imposes file conventions or scoping

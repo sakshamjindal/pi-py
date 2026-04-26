@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "harness"
+name = "coding-harness"
 version = "0.1.0"
-description = "Coding-agent scaffolding on top of the pyharness SDK: built-in tools, AGENTS.md, settings, skills, named agents, extensions, CLI."
+description = "Coding-agent scaffolding on top of the pyharness SDK: built-in tools, AGENTS.md, settings, skills, named agents, extensions, CLI. One concrete harness built on the pi-py kernel."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "pyharness contributors" }]
+authors = [{ name = "pi-py contributors" }]
 dependencies = [
     "pyharness",
     "pyyaml>=6.0",
@@ -21,7 +21,7 @@ dependencies = [
 extract = ["trafilatura>=1.8"]
 
 [project.scripts]
-pyharness = "harness.cli:main"
+pyharness = "coding_harness.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

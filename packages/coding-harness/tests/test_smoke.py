@@ -12,15 +12,15 @@ def test_pyharness_sdk_imports():
     assert hasattr(pkg, "AgentOptions")
 
 
-def test_harness_package_imports():
-    pkg = importlib.import_module("harness")
+def test_coding_harness_package_imports():
+    pkg = importlib.import_module("coding_harness")
     assert pkg.__version__
     assert hasattr(pkg, "CodingAgent")
     assert hasattr(pkg, "Settings")
 
 
 def test_cli_main_requires_prompt(capsys):
-    from harness.cli import main
+    from coding_harness.cli import main
 
     rc = main([])
     captured = capsys.readouterr()
@@ -42,25 +42,25 @@ def test_subsystem_modules_import():
         "pyharness.types",
         "pyharness.tools",
         "pyharness.tools.base",
-        # Harness scaffolding.
-        "harness",
-        "harness.cli",
-        "harness.coding_agent",
-        "harness.config",
-        "harness.workspace",
-        "harness.agents",
-        "harness.skills",
-        "harness.extensions_loader",
-        "harness._loader",
-        "harness.tools",
-        "harness.tools.builtin",
-        "harness.tools.builtin.read",
-        "harness.tools.builtin.write",
-        "harness.tools.builtin.edit",
-        "harness.tools.builtin.bash",
-        "harness.tools.builtin.grep",
-        "harness.tools.builtin.glob_tool",
-        "harness.tools.builtin.web_search",
-        "harness.tools.builtin.web_fetch",
+        # Coding-harness scaffolding.
+        "coding_harness",
+        "coding_harness.cli",
+        "coding_harness.coding_agent",
+        "coding_harness.config",
+        "coding_harness.workspace",
+        "coding_harness.agents",
+        "coding_harness.skills",
+        "coding_harness.extensions_loader",
+        "coding_harness._loader",
+        "coding_harness.tools",
+        "coding_harness.tools.builtin",
+        "coding_harness.tools.builtin.read",
+        "coding_harness.tools.builtin.write",
+        "coding_harness.tools.builtin.edit",
+        "coding_harness.tools.builtin.bash",
+        "coding_harness.tools.builtin.grep",
+        "coding_harness.tools.builtin.glob_tool",
+        "coding_harness.tools.builtin.web_search",
+        "coding_harness.tools.builtin.web_fetch",
     ):
         importlib.import_module(name)

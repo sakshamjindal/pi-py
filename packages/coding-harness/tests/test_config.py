@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from harness import Settings
+from coding_harness import Settings
 
 
 def test_defaults():

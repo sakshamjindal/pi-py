@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from harness import cli
-from harness.coding_agent import CodingAgent
+from coding_harness import cli
+from coding_harness.coding_agent import CodingAgent
 from pyharness import LLMResponse
 
 

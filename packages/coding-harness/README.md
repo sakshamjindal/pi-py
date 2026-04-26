@@ -1,4 +1,4 @@
-# harness — coding-agent scaffolding
+# coding-harness — coding-agent scaffolding
 
 Builds on the [`pyharness`](../pyharness-sdk/) SDK kernel to provide
 the out-of-the-box behaviour of the bundled coding agent: file
@@ -7,10 +7,10 @@ hierarchy, named sub-agents, skills, extensions discovery, eight
 built-in tools, and the `pyharness` CLI.
 
 Mirrors pi-mono's [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-as the application layer. Use this when you want pyharness as a
+as the application layer. Use this when you want pi-py as a
 ready-to-run coding agent. Skip it (and depend only on
 `pyharness-sdk`) when building a domain-specific harness with its
-own conventions.
+own conventions — see [`../pyharness-sdk/README.md`](../pyharness-sdk/README.md).
 
 ## CLI
 
@@ -48,7 +48,7 @@ pyharness --agent research-analyst "what changed in the markets today?"
 
 ```python
 import asyncio
-from harness import CodingAgent, CodingAgentConfig
+from coding_harness import CodingAgent, CodingAgentConfig
 
 async def main() -> None:
     agent = CodingAgent(CodingAgentConfig(
@@ -119,7 +119,7 @@ Example:
 }
 ```
 
-See `harness.config.Settings` for the full set of keys and defaults.
+See `coding_harness.config.Settings` for the full set of keys and defaults.
 
 ## Built-in tools
 
@@ -144,7 +144,7 @@ Top-level `examples/` directory in the repo:
 ## Public surface
 
 ```python
-from harness import (
+from coding_harness import (
     # main entry points
     CodingAgent, CodingAgentConfig, BASE_SYSTEM_PROMPT,
     # configuration

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import load_extensions
+from coding_harness import load_extensions
 from pyharness import (
     EventBus,
     ExtensionAPI,

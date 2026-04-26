@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import (
+from coding_harness import (
     LoadSkillTool,
     WorkspaceContext,
     build_skill_index,
