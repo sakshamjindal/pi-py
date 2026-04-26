@@ -107,24 +107,29 @@ def resolve_tool_list(
     *,
     agent_name: str | None = None,
 ) -> ToolRegistry:
-    """Build a registry containing only the declared tools (or all builtins
-    when ``declared`` is empty)."""
+    """Build a tool registry for a named agent.
 
-    builtins = {t.name: t for t in all_builtin_tools()}
-    if not declared:
-        reg = ToolRegistry()
-        for t in builtins.values():
-            reg.register(t)
+    Builtins are always registered. ``declared`` lists *additional*
+    non-builtin tools to pin as always-on (project tools or skill tools).
+    Empty / missing / ``["*"]`` means "just builtins" — same as the default
+    agent. Listing a builtin name in ``declared`` is a no-op (already
+    registered).
+    """
+
+    reg = ToolRegistry()
+    for t in all_builtin_tools():
+        reg.register(t)
+
+    if not declared or declared == ["*"]:
         return reg
 
     project_tools = _collect_project_tools(workspace)
     skill_tools = _collect_skill_tools(workspace)
 
-    reg = ToolRegistry()
     for name in declared:
-        if name in builtins:
-            reg.register(builtins[name])
-        elif name in project_tools:
+        if reg.has(name):
+            continue
+        if name in project_tools:
             reg.register(project_tools[name])
         elif name in skill_tools:
             reg.register(skill_tools[name])

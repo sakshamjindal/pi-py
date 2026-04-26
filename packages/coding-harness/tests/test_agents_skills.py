@@ -57,12 +57,30 @@ def test_load_agent_definition(tmp_path):
     assert "research agent" in agent.body
 
 
-def test_resolve_tool_list_builtins(tmp_path):
+def test_resolve_tool_list_builtins_always_present(tmp_path):
+    """Builtins are always registered. Listing a builtin in ``declared``
+    is a no-op; absent builtins are still registered."""
+
     home, workspace = _setup_project(tmp_path)
     ctx = WorkspaceContext(workspace=workspace, home=home)
     reg = resolve_tool_list(["read", "write", "bash"], ctx)
+    # All builtins present, including ones not in `declared`.
     assert reg.has("read") and reg.has("write") and reg.has("bash")
-    assert not reg.has("edit")
+    assert reg.has("edit") and reg.has("grep") and reg.has("glob")
+
+
+def test_resolve_tool_list_empty_means_builtins(tmp_path):
+    home, workspace = _setup_project(tmp_path)
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    reg = resolve_tool_list([], ctx)
+    assert reg.has("read") and reg.has("edit") and reg.has("bash")
+
+
+def test_resolve_tool_list_wildcard_means_builtins(tmp_path):
+    home, workspace = _setup_project(tmp_path)
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    reg = resolve_tool_list(["*"], ctx)
+    assert reg.has("read") and reg.has("edit") and reg.has("bash")
 
 
 def test_resolve_tool_list_unknown_raises(tmp_path):
@@ -100,6 +118,41 @@ def test_discover_skills_and_index(tmp_path):
     assert "load_skill" in idx
 
 
+def test_skill_index_uses_system_reminder(tmp_path):
+    home, workspace = _setup_project(tmp_path)
+    sd = home / "p" / ".pyharness" / "skills" / "demo"
+    sd.mkdir(parents=True)
+    (sd / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: a demo skill\n---\nbody",
+        encoding="utf-8",
+    )
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    idx = build_skill_index(discover_skills(ctx))
+    assert "<system-reminder>" in idx
+    assert "</system-reminder>" in idx
+    assert "demo" in idx
+
+
+def test_skill_index_split_when_loaded(tmp_path):
+    home, workspace = _setup_project(tmp_path)
+    base = home / "p" / ".pyharness" / "skills"
+    for n in ("a", "b"):
+        (base / n).mkdir(parents=True)
+        (base / n / "SKILL.md").write_text(
+            f"---\nname: {n}\ndescription: skill {n}\n---\n", encoding="utf-8"
+        )
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    skills = discover_skills(ctx)
+    idx = build_skill_index(skills, loaded={"a"})
+    assert "Loaded skills" in idx
+    assert "Available skills" in idx
+    # 'a' must appear under Loaded, 'b' under Available; loaded names
+    # come first in the output.
+    pos_a = idx.find("- a")
+    pos_b = idx.find("- b: skill b")
+    assert pos_a < pos_b
+
+
 @pytest.mark.asyncio
 async def test_load_skill_injects_instructions(tmp_path):
     home, workspace = _setup_project(tmp_path)
@@ -129,3 +182,96 @@ async def test_load_skill_injects_instructions(tmp_path):
     )
     assert res.loaded
     assert "DO_THE_THING" in res.instructions
+    # LoadSkillTool memoizes the loaded names so the index render can show
+    # accurate state.
+    assert "demo" in tool.loaded_names
+
+
+@pytest.mark.asyncio
+async def test_load_skill_picks_up_skills_installed_mid_run(tmp_path):
+    """A skill that lands on disk AFTER the agent's setup must still be
+    loadable via ``load_skill`` on the next call. Simulates the user
+    running a bash install command mid-session."""
+
+    home, workspace = _setup_project(tmp_path)
+    skills_dir = home / "p" / ".pyharness" / "skills"
+    skills_dir.mkdir(parents=True)
+
+    # Initially: no skills on disk.
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    reg = ToolRegistry()
+
+    def _live_provider():
+        return discover_skills(ctx)
+
+    tool = LoadSkillTool(_live_provider, reg)
+
+    # First call — skill doesn't exist yet.
+    res = await tool.execute(
+        tool.args_schema(name="late-arrival"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    assert res.loaded is False
+    assert "Unknown skill" in res.message
+
+    # Mid-run, a skill is installed (e.g. by a bash tool call to
+    # `npx skills add ...`).
+    sd = skills_dir / "late-arrival"
+    sd.mkdir(parents=True)
+    (sd / "SKILL.md").write_text(
+        "---\nname: late-arrival\ndescription: dropped in mid-run\n---\nLATE_BODY",
+        encoding="utf-8",
+    )
+
+    # Second call — same tool instance, new skill on disk. Must be found.
+    res2 = await tool.execute(
+        tool.args_schema(name="late-arrival"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    assert res2.loaded is True
+    assert "LATE_BODY" in res2.instructions
+    assert "late-arrival" in tool.loaded_names
+
+
+@pytest.mark.asyncio
+async def test_load_skill_runs_bundle_hooks(tmp_path):
+    """A skill bundle (SKILL.md + tools.py + hooks.py) must invoke
+    ``hooks.py:register(api)`` when activated, but only if an
+    ExtensionAPI has been bound."""
+
+    from pyharness import EventBus, ExtensionAPI, HandlerContext, LifecycleEvent
+
+    home, workspace = _setup_project(tmp_path)
+    sd = home / "p" / ".pyharness" / "skills" / "bundle"
+    sd.mkdir(parents=True)
+    (sd / "SKILL.md").write_text(
+        "---\nname: bundle\ndescription: bundle\n---\nbody", encoding="utf-8"
+    )
+    (sd / "hooks.py").write_text(
+        "from pyharness import HookOutcome\n"
+        "def register(api):\n"
+        "    api.on('e', _h)\n"
+        "async def _h(event, ctx):\n"
+        "    return HookOutcome.deny('blocked-by-bundle')\n",
+        encoding="utf-8",
+    )
+
+    ctx = WorkspaceContext(workspace=workspace, home=home)
+    skills = discover_skills(ctx)
+    assert skills["bundle"].hooks_module is not None
+
+    bus = EventBus()
+    reg = ToolRegistry()
+    api = ExtensionAPI(bus=bus, registry=reg, settings=None)
+    tool = LoadSkillTool(skills, reg)
+    tool.bind_extension_api(api)
+
+    await tool.execute(
+        tool.args_schema(name="bundle"),
+        ToolContext(workspace=workspace, session_id="s", run_id="r"),
+    )
+    out = await bus.emit(
+        LifecycleEvent(name="e"),
+        HandlerContext(settings=None, workspace=workspace, session_id="s", run_id="r"),
+    )
+    assert out.reason == "blocked-by-bundle"

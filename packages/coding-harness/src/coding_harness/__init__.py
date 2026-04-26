@@ -19,9 +19,16 @@ from .coding_agent import (
     BASE_SYSTEM_PROMPT,
     CodingAgent,
     CodingAgentConfig,
+    NoProjectError,
 )
 from .config import Settings
-from .extensions_loader import LoadedExtensions, load_extensions
+from .extensions_loader import (
+    AvailableExtensions,
+    LoadedExtensions,
+    discover_extensions,
+    load_extensions,
+)
+from .orchestration import agent_workspace
 from .skills import (
     LoadSkillResult,
     LoadSkillTool,
@@ -37,20 +44,24 @@ __version__ = "0.1.0"
 __all__ = [
     "BASE_SYSTEM_PROMPT",
     "AgentDefinition",
+    "AvailableExtensions",
     "CodingAgent",
     "CodingAgentConfig",
     "LoadSkillResult",
     "LoadSkillTool",
     "LoadedExtensions",
+    "NoProjectError",
     "Settings",
     "SkillDefinition",
     "WorkspaceContext",
     "__version__",
+    "agent_workspace",
     "all_builtin_tools",
     "build_skill_index",
     "builtin_registry",
     "builtin_tool_names",
     "discover_agents",
+    "discover_extensions",
     "discover_skills",
     "list_known_tool_names",
     "load_agent_definition",

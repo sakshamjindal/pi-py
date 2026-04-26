@@ -1,21 +1,39 @@
-# pyharness — agent SDK kernel
+# pyharness-sdk
 
-The kernel of pi-py: agent loop, LLM client, tool ABC, sessions,
-queues, events, extension runtime. **This is what you build on**
-when constructing a domain-specific harness (finance, autoresearch,
-quant research, …) — it gives you the primitives without imposing
-file conventions, settings layout, or a CLI.
+The kernel of pi-py. The agent loop, the LLM client, the tool ABC,
+the session log, the event bus, the compactor — and nothing more.
+**This is what you build on** when constructing a domain-specific
+harness (finance, autoresearch, quant, …).
 
-Mirrors pi-mono's [`packages/agent`](https://github.com/badlogic/pi-mono/tree/main/packages/agent)
-as the kernel layer, with a single LLM provider surface (LiteLLM)
-folded in.
+No file conventions. No settings layout. No CLI. No built-in tools.
+Anything that imposes scoping rules belongs one layer up — see
+[`coding-harness`](../coding-harness/) for the application built on
+this kernel.
+
+> Mirrors pi-mono's [`packages/agent`](https://github.com/badlogic/pi-mono/tree/main/packages/agent),
+> with a single LLM provider surface (LiteLLM) folded in.
 
 ---
 
-## How the loop works
+## Table of Contents
 
-`pyharness.Agent.run(prompt)` (and `Agent.start(prompt)`) drive a
-straight-line loop. One turn looks like:
+- [The Loop](#the-loop)
+- [Quick Start](#quick-start)
+  - [Minimal Agent](#minimal-agent)
+  - [Custom Tool](#custom-tool)
+  - [Live Steering](#live-steering)
+  - [Extensions](#extensions)
+- [What's in the Box](#whats-in-the-box)
+- [Lifecycle Events](#lifecycle-events)
+- [What's Not Here (Deliberately)](#whats-not-here-deliberately)
+- [Termination](#termination)
+
+---
+
+## The Loop
+
+`Agent.run(prompt)` (and `Agent.start(prompt)`) drive a straight-line
+loop. One turn:
 
 ```
                  ┌─────────────────────┐
@@ -63,56 +81,14 @@ straight-line loop. One turn looks like:
 
 Every step writes a typed event to the `Session` JSONL log and emits
 a `LifecycleEvent` on the `EventBus`. The session log is the durable
-record; the event bus is the *live* observation/intervention surface
+record; the event bus is the live observation/intervention surface
 for extensions.
-
-The loop terminates when:
-- The LLM returns no tool calls → `RunResult(completed=True, reason="completed")`.
-- `max_turns` is reached → `RunResult(completed=False, reason="max_turns")`.
-- `AgentHandle.abort_event.set()` is called → `reason="aborted"`.
-- An LLM call raises or an extension denies a turn → `reason="error"`.
-
-## What's in the box
-
-| Symbol | Role |
-| --- | --- |
-| `Agent`, `AgentOptions` | The loop and its config. |
-| `AgentHandle`, `MessageQueue` | Live steering and follow-up. |
-| `LLMClient`, `LLMError`, `count_tokens` | Thin LiteLLM wrapper with Anthropic prompt caching. Streaming canonical; `complete()` consumes the stream. |
-| `Tool`, `ToolRegistry`, `ToolContext`, `ToolError`, `execute_tool`, `safe_path` | The contract any tool must satisfy. Args validated via Pydantic before `execute`; failures and exceptions return `ok=False` so the loop can hand them to the LLM and let it self-correct. |
-| `Session`, `SessionInfo` | Append-only JSONL log; `new` / `resume` / `fork` / `read_messages` for transcript reconstruction. |
-| `EventBus`, `ExtensionAPI`, `HookOutcome`, `HookResult`, `HandlerContext`, `LifecycleEvent` | Extension runtime types. First non-Continue outcome wins. |
-| `Compactor`, `CompactionResult` | Transparent context compaction. Keeps system + last N messages verbatim; summarises the middle via the cheaper `summarization_model`. |
-| `Message`, `ToolCall`, `RunResult`, `LLMResponse`, `StreamEvent`, `TokenUsage` | Pydantic IO types. |
-| Event subclasses (`SessionStartEvent`, `ToolCallEndEvent`, …) | Persisted JSONL event payloads. |
-
-## What's NOT here (deliberately)
-
-- No built-in tools — those live in `coding-harness`.
-- No `settings.json` loader — you pass `AgentOptions` yourself.
-- No `AGENTS.md` walking — the system prompt is whatever you hand in.
-- No named sub-agents, no skills loader, no extension file
-  discovery — those are application concerns in `coding-harness`.
-- No CLI.
-
-This is the kernel. Anything that imposes file conventions or scoping
-rules belongs one layer up.
-
-**For domain-specific harnesses** (finance, autoresearch, etc.), you
-typically don't need to use the SDK directly. Instead, use
-`coding-harness` with a project directory containing your domain's
-tools, agents, skills, and extensions in `.pyharness/`. The
-project-as-files pattern lets you build any domain harness without
-writing assembly code. See
-[`docs/guides/build-finance-harness.md`](../../docs/guides/build-finance-harness.md)
-and
-[`docs/guides/build-autoresearch-harness.md`](../../docs/guides/build-autoresearch-harness.md).
 
 ---
 
-## Quick starts
+## Quick Start
 
-### Minimal agent
+### Minimal Agent
 
 ```python
 import asyncio
@@ -123,10 +99,9 @@ from pyharness import (
 )
 
 async def main() -> None:
-    options = AgentOptions(model="claude-opus-4-7", max_turns=10)
     workspace = Path.cwd()
     agent = Agent(
-        options,
+        AgentOptions(model="claude-opus-4-7", max_turns=10),
         system_prompt="You are a minimal echo agent.",
         tool_registry=ToolRegistry(),       # no tools = LLM must reply directly
         session=Session.new(workspace),
@@ -143,7 +118,7 @@ asyncio.run(main())
 You supply system prompt, tools, session, and event bus. Everything
 the loop needs is explicit.
 
-### Custom tool
+### Custom Tool
 
 ```python
 from pydantic import BaseModel, Field
@@ -163,15 +138,16 @@ class AddTool(Tool):
 
 registry = ToolRegistry()
 registry.register(AddTool())
-# then pass `registry` into Agent(...)
+# pass registry to Agent(...)
 ```
 
 The LLM sees the tool schema (generated from `args_schema` via
-`Tool.to_openai_schema()`), so it knows the parameter shape. Args are
-validated with Pydantic before `execute` runs. Validation failures
-and exceptions become `ok=False` tool results rather than crashes.
+`Tool.to_openai_schema()`). Args are validated with Pydantic before
+`execute` runs. Validation failures and exceptions become `ok=False`
+tool results rather than crashes — the loop hands them back to the
+LLM and lets it self-correct.
 
-### Live steering
+### Live Steering
 
 ```python
 handle = agent.start("research X in depth")
@@ -180,11 +156,13 @@ await handle.follow_up_msg("note: skip Z")
 result = await handle.wait()
 ```
 
-`steer` is consumed at the top of the next turn; `follow_up_msg` is
-consumed between turns; `abort_event.set()` cuts the run after the
-in-flight tool call finishes.
+| Method | When |
+|---|---|
+| `steer(text)` | Consumed at the top of the next turn |
+| `follow_up_msg(text)` | Consumed between turns |
+| `abort_event.set()` | Cuts the run after the in-flight tool call finishes |
 
-### Extension subscribing to events
+### Extensions
 
 ```python
 from pyharness import EventBus, ExtensionAPI, HookOutcome, ToolRegistry
@@ -197,59 +175,98 @@ async def on_tool(event, ctx):
     return HookOutcome.cont()
 
 api.on("before_tool_call", on_tool)
-# pass `bus` into Agent(...) — handlers fire on every tool call
+# pass bus to Agent(...) — handlers fire on every tool call
 ```
 
-`HookOutcome.deny(reason)` blocks the call; `HookOutcome.replace(value)`
-short-circuits with a synthetic result; the first non-`Continue`
-outcome wins.
+| `HookOutcome` | Effect |
+|---|---|
+| `Continue` | Default; loop proceeds normally |
+| `Deny(reason)` | Block the call; loop sees a denial |
+| `Modify(new_event)` | Replace the event payload, continue |
+| `Replace(value)` | Short-circuit with a synthetic result |
 
-## Lifecycle events
+The first non-`Continue` outcome wins.
+
+---
+
+## What's in the Box
+
+| Symbol | Role |
+|---|---|
+| `Agent`, `AgentOptions`, `AgentHandle` | The loop, its config, and live-steering handle |
+| `LLMClient`, `LLMError`, `count_tokens` | Thin LiteLLM wrapper. Streaming canonical; `complete()` consumes the stream. Anthropic prompt caching applied automatically for Claude models. |
+| `Tool`, `ToolRegistry`, `ToolContext`, `ToolError`, `execute_tool`, `safe_path` | The contract any tool must satisfy. Pydantic-validated args. |
+| `Session`, `SessionInfo` | Append-only JSONL log; `new` / `resume` / `fork` / `read_messages`. |
+| `MessageQueue` | Steering and follow-up queues, exposed through `AgentHandle`. |
+| `EventBus`, `ExtensionAPI`, `HookOutcome`, `HookResult`, `HandlerContext`, `LifecycleEvent` | Extension runtime types. |
+| `Compactor`, `CompactionResult` | Transparent context compaction. Keeps system + last N messages verbatim; summarises the middle via the cheaper `summarization_model`. |
+| `Message`, `ToolCall`, `RunResult`, `LLMResponse`, `StreamEvent`, `TokenUsage` | Pydantic IO types. |
+| Event subclasses | `SessionStartEvent`, `ToolCallEndEvent`, `AssistantMessageEvent`, … — the persisted JSONL payloads. |
+
+For the complete export list see
+[`src/pyharness/__init__.py`](src/pyharness/__init__.py).
+
+---
+
+## Lifecycle Events
 
 Subscribable via `EventBus.subscribe(name, handler)`:
 
 | Event | Fires |
-| --- | --- |
-| `session_start`, `session_end` | At the start / end of a run. |
-| `turn_start`, `turn_end` | At the boundary of each loop turn. |
-| `before_llm_call`, `after_llm_call` | Around each LLM completion. |
-| `before_tool_call`, `after_tool_call` | Around each tool invocation. |
-| `compaction_start`, `compaction_end` | Around context compaction. |
-| `steering_received`, `followup_received` | When a queued message is consumed. |
+|---|---|
+| `session_start`, `session_end` | At the start / end of a run |
+| `turn_start`, `turn_end` | At the boundary of each loop turn |
+| `before_llm_call`, `after_llm_call` | Around each LLM completion |
+| `before_tool_call`, `after_tool_call` | Around each tool invocation |
+| `compaction_start`, `compaction_end` | Around context compaction |
+| `steering_received`, `followup_received` | When a queued message is consumed |
 
-`HookOutcome` values: `Continue`, `Deny`, `Modify`, `Replace`. The
-first non-Continue outcome wins. `Modify` swaps the event payload
-and continues; `Replace` short-circuits with a synthetic result for
-LLM/tool calls; `Deny` blocks.
+Handlers run in registration order. Exceptions from handlers are
+logged and skipped — extensions never crash the harness.
 
-## Public surface
+---
 
-```python
-from pyharness import (
-    # loop
-    Agent, AgentOptions, AgentHandle,
-    # LLM
-    LLMClient, LLMError, count_tokens,
-    # tools
-    Tool, ToolContext, ToolError, ToolRegistry,
-    ToolExecutionResult, execute_tool, safe_path,
-    # sessions
-    Session, SessionInfo,
-    # queues
-    MessageQueue,
-    # extensions runtime
-    EventBus, ExtensionAPI, HookOutcome, HookResult,
-    HandlerContext, LifecycleEvent,
-    # compaction
-    Compactor, CompactionResult,
-    # types
-    Message, ToolCall, RunResult, LLMResponse,
-    StreamEvent, TokenUsage,
-    # events
-    AgentEvent, SessionStartEvent, SessionEndEvent,
-    UserMessageEvent, AssistantMessageEvent,
-    ToolCallStartEvent, ToolCallEndEvent,
-    CompactionEvent, SteeringMessageEvent, FollowUpMessageEvent,
-    SkillLoadedEvent, parse_event,
-)
-```
+## What's Not Here (Deliberately)
+
+- **No built-in tools.** Those live in `coding-harness`.
+- **No `settings.json` loader.** You pass `AgentOptions` yourself.
+- **No `AGENTS.md` walking.** The system prompt is whatever you hand in.
+- **No named sub-agents, skills loader, or extension file discovery.**
+  Application concerns; see `coding-harness`.
+- **No CLI.** The kernel is a library.
+
+This is on purpose. Anything that imposes file conventions or
+scoping rules belongs one layer up.
+
+> **For domain-specific harnesses** (finance, autoresearch, etc.),
+> you typically don't need to use the SDK directly. Use
+> `coding-harness` with a project directory containing your domain's
+> tools, agents, skills, and extensions in `.pyharness/`. The
+> project-as-files pattern lets you build any domain harness without
+> writing assembly code.
+
+---
+
+## Termination
+
+The loop terminates when:
+
+| Condition | `RunResult.reason` |
+|---|---|
+| LLM returns no tool calls | `"completed"` (with `completed=True`) |
+| `max_turns` reached | `"max_turns"` |
+| `AgentHandle.abort_event.set()` called | `"aborted"` |
+| LLM call raises or extension denies a turn | `"error"` |
+
+`RunResult` is a Pydantic model — `final_output`, `reason`,
+`completed`, plus token / cost accounting in `usage`.
+
+---
+
+## See Also
+
+- [`coding-harness`](../coding-harness/) — application built on this kernel
+- [`tui`](../tui/) — minimal interactive shell
+- [`DESIGN.md`](../../DESIGN.md) — principles and architecture
+- [docs/guides/build-finance-harness.md](../../docs/guides/build-finance-harness.md)
+- [docs/guides/build-autoresearch-harness.md](../../docs/guides/build-autoresearch-harness.md)

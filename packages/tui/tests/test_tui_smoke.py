@@ -17,6 +17,10 @@ def test_pyharness_tui_imports():
 def test_one_shot_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, capsys):
     """`pyharness-tui "prompt"` runs once and prints the LLM's final text."""
 
+    # CodingAgent now requires a `.pyharness/` marker at or above the
+    # workspace; create one so the strict-mode check passes.
+    (tmp_path / ".pyharness").mkdir()
+
     real_init = CodingAgent.__init__
 
     def patched_init(self, config):
@@ -41,6 +45,8 @@ def test_one_shot_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, c
 def test_repl_exits_on_eof(tmp_path, monkeypatch, isolated_session_dir):
     """No-arg invocation enters the REPL; immediate EOF exits cleanly."""
 
+    # No agent is constructed in this test (immediate EOF from the
+    # input loop), so no `.pyharness/` marker is needed.
     monkeypatch.chdir(tmp_path)
 
     def _eof(_prompt):

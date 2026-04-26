@@ -19,6 +19,7 @@ consumes. No subclassing needed. See
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,12 +36,13 @@ from pyharness import (
     RunResult,
     Session,
     SkillLoadedEvent,
+    Tool,
     ToolRegistry,
 )
 
 from .agents import discover_agents, load_agent_definition, resolve_tool_list
 from .config import Settings
-from .extensions_loader import load_extensions
+from .extensions_loader import discover_extensions, load_extensions
 from .skills import LoadSkillTool, SkillDefinition, build_skill_index, discover_skills
 from .tools.builtin import builtin_registry
 from .workspace import WorkspaceContext
@@ -54,6 +56,17 @@ BASE_SYSTEM_PROMPT = (
     "- Prefer one tool call at a time when reasoning is involved.\n"
     "- If a tool returns an error, read the message and adjust before retrying.\n"
 )
+
+
+class NoProjectError(RuntimeError):
+    """Raised when ``CodingAgent`` is constructed without a discoverable
+    ``.pyharness/`` marker above the workspace and ``bare=False``.
+
+    Pyharness requires an explicit project boundary so personal
+    home-directory config can't silently leak into unrelated runs. Run
+    ``pyharness init`` to create one, or pass ``bare=True`` to skip
+    the project requirement entirely.
+    """
 
 
 @dataclass
@@ -72,6 +85,18 @@ class CodingAgentConfig:
     extra_messages: list[Message] = field(default_factory=list)
     cli_overrides: dict[str, Any] = field(default_factory=dict)
 
+    # Programmatic overlays for SDK / TUI use. Filesystem discovery still
+    # runs; these are merged on top.
+    extra_skills: list[SkillDefinition] = field(default_factory=list)
+    extra_tools: list[Tool] = field(default_factory=list)
+    extra_extensions: list[Callable[[ExtensionAPI], None]] = field(default_factory=list)
+
+    # Allow/deny overrides. ``None`` means "fall back to the named agent's
+    # frontmatter (or the relevant default)." A list — including the empty
+    # list — overrides frontmatter and CLI flags.
+    extensions_enabled: list[str] | None = None
+    skills_enabled: list[str] | None = None
+
 
 class CodingAgent:
     """Assembles a pyharness ``Agent`` with coding-agent defaults."""
@@ -81,6 +106,16 @@ class CodingAgent:
         self.workspace_ctx = WorkspaceContext(
             workspace=config.workspace, project_root=config.project_root
         )
+        if not config.bare and self.workspace_ctx.project_root is None:
+            raise NoProjectError(
+                f"No project found.\n\n"
+                f"pyharness requires a `.pyharness/` directory at or above the workspace.\n"
+                f"None was found above:\n  {self.workspace_ctx.workspace}\n\n"
+                f"Either:\n"
+                f"  - Run `pyharness init` from your project directory to create one, or\n"
+                f"  - Use `--workspace <path>` to point inside an existing project, or\n"
+                f"  - Pass `--bare` to skip the project requirement (no AGENTS.md, settings, or extensions)."
+            )
         self.settings = config.settings or Settings.load(
             workspace=self.workspace_ctx.workspace,
             project_root=self.workspace_ctx.project_root,
@@ -130,23 +165,105 @@ class CodingAgent:
 
     def _setup(self) -> None:
         self._build_tool_registry()
-        self.skills = discover_skills(self.workspace_ctx)
+
+        # Build a closure that re-discovers skills on every call. This
+        # makes ``load_skill`` see skills installed mid-run (e.g. via a
+        # bash call to ``npx skills add ...``) without requiring the
+        # user to restart the agent. The named-agent allowlist and
+        # programmatic ``extra_skills`` are re-applied on every call,
+        # so the contract is preserved.
+        skill_allow = self._resolve_skills_allowlist()
+        extra_skills = list(self.config.extra_skills)
+
+        def _live_skills() -> dict[str, SkillDefinition]:
+            found = discover_skills(self.workspace_ctx)
+            if skill_allow is not None:
+                found = {k: v for k, v in found.items() if k in skill_allow}
+            for sd in extra_skills:
+                found[sd.name] = sd
+            return found
+
+        # Initial snapshot for system prompt rendering. The system
+        # prompt is built once at setup so this is the catalog the
+        # model sees in its index. Newly-installed skills won't be
+        # listed here, but the model can still reach them by name
+        # (e.g. from the install tool's stdout).
+        self.skills = _live_skills()
+
+        # Programmatic always-on tools (extras win over duplicates).
+        for tool in self.config.extra_tools:
+            if self.tool_registry.has(tool.name):
+                self.tool_registry.replace(tool.name, tool)
+            else:
+                self.tool_registry.register(tool)
+
         # Register the load_skill tool last so the registry already
         # contains the agent's other tools.
-        self.tool_registry.register(
-            LoadSkillTool(self.skills, self.tool_registry, on_load=self._on_skill_loaded)
+        self.load_skill_tool = LoadSkillTool(
+            _live_skills, self.tool_registry, on_load=self._on_skill_loaded
         )
+        self.tool_registry.register(self.load_skill_tool)
         self.system_prompt = self._build_system_prompt()
 
-        if not self.config.bare:
-            api = ExtensionAPI(
-                bus=self.event_bus,
-                registry=self.tool_registry,
-                settings=self.settings,
-                session_appender=None,
-            )
-            loaded = load_extensions(api, self.workspace_ctx.collect_extensions_dirs())
-            self.extensions_loaded = loaded.modules
+        # Extensions: opt-in only. Filesystem + entry-point discovery
+        # always runs (so the catalog is queryable), but activation
+        # requires explicit enable.
+        self.extensions_available = discover_extensions(
+            self.workspace_ctx.collect_extensions_dirs()
+        )
+        if self.config.bare:
+            return
+
+        ext_enabled = self._resolve_extensions_enabled()
+        api = ExtensionAPI(
+            bus=self.event_bus,
+            registry=self.tool_registry,
+            settings=self.settings,
+            session_appender=None,
+        )
+        # Bind the API so skill bundles can register their hooks.py at
+        # load_skill time.
+        self.load_skill_tool.bind_extension_api(api)
+        loaded = load_extensions(
+            api,
+            self.extensions_available,
+            ext_enabled,
+            extra_register_fns=self.config.extra_extensions,
+        )
+        self.extensions_loaded = loaded.modules
+
+    # ------------------------------------------------------------------
+    # Allowlist resolution (programmatic > frontmatter > default)
+    # ------------------------------------------------------------------
+
+    def _resolve_skills_allowlist(self) -> set[str] | None:
+        """Return the set of skill names the agent may see.
+
+        ``None`` means "no filter" (all discovered skills visible).
+        """
+
+        if self.config.skills_enabled is not None:
+            allow = self.config.skills_enabled
+        elif self.agent_def is not None:
+            allow = list(self.agent_def.raw_frontmatter.get("skills") or [])
+        else:
+            allow = []
+        if not allow or "*" in allow:
+            return None
+        return set(allow)
+
+    def _resolve_extensions_enabled(self) -> list[str]:
+        """Return the list of extension names to activate.
+
+        Empty list means "no extensions activated." Extensions are never
+        auto-loaded — they must be named explicitly somewhere.
+        """
+
+        if self.config.extensions_enabled is not None:
+            return list(self.config.extensions_enabled)
+        if self.agent_def is not None:
+            return list(self.agent_def.raw_frontmatter.get("extensions") or [])
+        return []
 
     def _build_tool_registry(self) -> None:
         if self.config.agent_name:
