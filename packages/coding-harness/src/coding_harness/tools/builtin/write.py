@@ -19,6 +19,7 @@ class WriteTool(Tool):
         "created. Returns the written path and line count."
     )
     args_schema = WriteArgs
+    execution_mode = "sequential"
 
     async def execute(self, args: WriteArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         p = safe_path(ctx.workspace, args.path)

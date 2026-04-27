@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 
 class MessageQueue:
@@ -33,13 +35,16 @@ class MessageQueue:
 
 @dataclass
 class AgentHandle:
-    """Returned by ``Agent.start(...)``. Lets the caller steer or
-    follow-up while the run is in flight."""
+    """Returned by ``Agent.start(...)``. Lets the caller steer, follow up,
+    abort, or continue the run after an error."""
 
     steering: MessageQueue
     follow_up: MessageQueue
     abort_event: asyncio.Event
     task: asyncio.Task
+    # Bound to ``Agent.continue_run`` when constructed by ``Agent.start``.
+    # Optional so the dataclass can still be hand-built in tests.
+    continue_fn: Callable[[], Awaitable[Any]] | None = None
 
     async def steer(self, content: str) -> None:
         await self.steering.put(content)
@@ -52,3 +57,19 @@ class AgentHandle:
 
     async def wait(self):
         return await self.task
+
+    async def continue_run(self):
+        """Resume the run without sending a new prompt. The previous
+        ``task`` must already be done (e.g. it returned with reason
+        ``error`` or ``aborted``). Returns the new ``RunResult``.
+        """
+
+        if self.continue_fn is None:
+            raise RuntimeError(
+                "continue_run is unavailable on this handle (build via Agent.start)"
+            )
+        if not self.task.done():
+            raise RuntimeError("Cannot continue while the previous run is still in flight")
+        # Reset abort so a fresh run can proceed.
+        self.abort_event.clear()
+        return await self.continue_fn()
