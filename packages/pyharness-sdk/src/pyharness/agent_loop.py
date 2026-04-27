@@ -130,7 +130,11 @@ async def agent_loop(
 
     if initial_prompt:
         await session_appender(user_message_event_factory(initial_prompt))
-        messages.append(Message(role="user", content=initial_prompt))
+        await _append_message(
+            messages,
+            Message(role="user", content=initial_prompt),
+            emit_lifecycle=emit_lifecycle,
+        )
 
     return await _run_loop(
         messages=messages,
@@ -294,12 +298,14 @@ async def _run_loop(
                 tool_calls=tc_dicts,
             )
         )
-        messages.append(
+        await _append_message(
+            messages,
             Message(
                 role="assistant",
                 content=response.text,
                 tool_calls=tc_dicts or None,
-            )
+            ),
+            emit_lifecycle=emit_lifecycle,
         )
 
         if not response.tool_calls:
@@ -325,7 +331,7 @@ async def _run_loop(
         # Append tool messages in assistant source order. The dispatcher
         # already preserved that order in batch.results.
         for tool_msg in batch.tool_messages:
-            messages.append(tool_msg)
+            await _append_message(messages, tool_msg, emit_lifecycle=emit_lifecycle)
 
         if abort_event.is_set():
             reason = "aborted"
@@ -617,12 +623,20 @@ async def _drain_into_messages(
         for content in await steering_drainer():
             await session_appender(SteeringMessageEvent(session_id=session_id, content=content))
             await emit_lifecycle("steering_received", {"content": content})
-            messages.append(Message(role="user", content=f"[steering] {content}"))
+            await _append_message(
+                messages,
+                Message(role="user", content=f"[steering] {content}"),
+                emit_lifecycle=emit_lifecycle,
+            )
     if followup_drainer is not None:
         for content in await followup_drainer():
             await session_appender(FollowUpMessageEvent(session_id=session_id, content=content))
             await emit_lifecycle("followup_received", {"content": content})
-            messages.append(Message(role="user", content=content))
+            await _append_message(
+                messages,
+                Message(role="user", content=content),
+                emit_lifecycle=emit_lifecycle,
+            )
 
 
 async def _maybe_compact(
@@ -682,3 +696,29 @@ async def _record_tool_end(
             duration_ms=ter.duration_ms,
         )
     )
+
+
+async def _append_message(
+    messages: list[Message],
+    msg: Message,
+    *,
+    emit_lifecycle: LifecycleEmitter,
+) -> None:
+    """Append ``msg`` to the transcript with ``message_start`` /
+    ``message_end`` lifecycle events fired around the append.
+
+    The two events bracket the in-memory append so a subscriber can
+    react both before the transcript reflects the new message and
+    after. Used by the loop for every transcript-mutating step
+    (initial prompt, assistant message, tool result, steering /
+    follow-up injections).
+
+    Payload shape: ``{"message": <Message.model_dump()>}``. The dump
+    is computed once and shared between the two events so subscribers
+    see consistent data.
+    """
+
+    payload = {"message": msg.model_dump(exclude_none=True)}
+    await emit_lifecycle("message_start", payload)
+    messages.append(msg)
+    await emit_lifecycle("message_end", payload)
