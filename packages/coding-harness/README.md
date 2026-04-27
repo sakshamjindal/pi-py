@@ -206,8 +206,8 @@ Plus CLI flags as a third overriding layer. Example:
   "summarization_model": "claude-haiku-4-5",
   "max_turns": 100,
   "compaction_threshold_pct": 0.8,
-  "search_provider": "brave",
-  "search_api_key_env": "BRAVE_API_KEY"
+  "search_provider": "tavily",
+  "search_api_key_env": "TAVILY_API_KEY"
 }
 ```
 
@@ -533,7 +533,7 @@ pyharness --fork <id> --at-event 12 "alternative path"
 | `bash` | Shell with a small list of catastrophic-pattern hard-blocks (`rm -rf /`, fork bombs, `dd` to block devices, …). |
 | `grep` | Regex search; uses `rg` if installed, falls back to a Python implementation. |
 | `glob` | Pathname pattern listing. |
-| `web_search` | Configurable provider (Brave / Tavily / Exa). API key from `settings.search_api_key_env`. |
+| `web_search` | Configurable provider (Tavily default; Brave / Exa optional). API key from `settings.search_api_key_env`. |
 | `web_fetch` | HTTP GET with optional HTML extraction (requires `extract` extra for trafilatura). |
 | `load_skill` | Loads an on-demand skill by name; auto-registered. |
 

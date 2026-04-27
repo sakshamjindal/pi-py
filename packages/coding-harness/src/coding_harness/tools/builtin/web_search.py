@@ -32,10 +32,10 @@ class WebSearchTool(Tool):
 
     async def execute(self, args: WebSearchArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         settings = ctx.settings
-        provider = (getattr(settings, "search_provider", None) if settings else None) or "brave"
+        provider = (getattr(settings, "search_provider", None) if settings else None) or "tavily"
         env_key = (
             getattr(settings, "search_api_key_env", None) if settings else None
-        ) or "BRAVE_API_KEY"
+        ) or "TAVILY_API_KEY"
         api_key = os.environ.get(env_key)
         if not api_key:
             return (
