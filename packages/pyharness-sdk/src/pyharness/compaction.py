@@ -33,11 +33,19 @@ class Compactor:
         summarization_model: str,
         keep_recent_count: int = 20,
         target_token_reduction: float = 0.5,
+        max_summary_tokens: int = 8_000,
     ):
         self.llm = llm
         self.summarization_model = summarization_model
         self.keep_recent_count = keep_recent_count
         self.target_token_reduction = target_token_reduction
+        # Caps the summarisation LLM call's output budget. Without this we
+        # fall through to the model's default (64k for Haiku/Opus 4.x),
+        # which OpenRouter charges credits-on-hand against — making a
+        # compaction call require ~$5 of pre-paid balance even though
+        # actual summaries are typically <2k tokens. 8k is a generous
+        # ceiling that covers any reasonable summary of a 130k+ transcript.
+        self.max_summary_tokens = max_summary_tokens
 
     async def maybe_compact(
         self,
@@ -118,5 +126,9 @@ class Compactor:
             "----- transcript -----\n" + "\n\n".join(rendered)
         )
         msgs = [Message(role="user", content=prompt)]
-        resp = await self.llm.complete(model=self.summarization_model, messages=msgs)
+        resp = await self.llm.complete(
+            model=self.summarization_model,
+            messages=msgs,
+            max_tokens=self.max_summary_tokens,
+        )
         return resp.text.strip() or "(no summary returned)"
