@@ -5,17 +5,23 @@
 > (yet another harness!) pi-py is your own minimal claude code and python agent harness implementation inspired from Pi-mono and programmable alternative to Claude Code
 
 **A headless Python agent harness.**
-Supports Claude, Anthropic, OpenAI, and any LiteLLM provider. Embeddable agent SDK,
-AGENTS.md, SKILL.md plugins, opt-in extensions via Python entry points.
+Supports Claude, Anthropic, and OpenAI. pi-py is an **embeddable
+agent SDK** with pluggable skills and agents using the Anthropic-
+ecosystem `SKILL.md` and `AGENTS.md` frontmatter formats, plus
+pluggable extensions (inspired by pi-mono) wired up through Python
+entry points. Following Anthropic's view that the **coding agent is
+the general-purpose agent**, domain-specific agents (finance,
+autoresearch, ops, support) are built *on top of* the bundled coding
+harness rather than as separate runtimes.
 
 The intent is that **domain-specific harnesses are built on top of
-pi-py** rather than reinventing the loop, the session log, the tool
-ABC, and the extension surface every time.
+pi-py** rather than reinventing the loop, the session log, and the
+extension surface every time.
 
 > Inspired by [pi-mono](https://github.com/badlogic/pi-mono):
 > minimal core, files-as-truth, observability over magic. File
 > formats from Claude Code (frontmatter agents, SKILL.md). Own
-> choices: Python (so tools are Python), LiteLLM, headless and
+> choices: Python (so tools are Python), headless and
 > programmatic over interactive.
 
 ---
@@ -165,7 +171,7 @@ Approval gates would block scheduled and SDK-driven runs.
 (deny LLM calls, modify messages, register tools). Auto-load would
 leak blast radius across roles. Opt in by name.
 
-**No MCP in core.** The tool ABC is local Python; MCP can ship as an
+**No MCP in core.** Tools are local Python; MCP can ship as an
 extension.
 
 See [`DESIGN.md`](DESIGN.md) for the full principles and explicit
