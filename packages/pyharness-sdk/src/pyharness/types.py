@@ -45,6 +45,7 @@ class StreamEvent(BaseModel):
 
     type: Literal[
         "text_delta",
+        "thinking_delta",
         "tool_call_start",
         "tool_call_delta",
         "tool_call_end",

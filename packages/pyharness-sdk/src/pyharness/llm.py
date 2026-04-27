@@ -115,6 +115,8 @@ class LLMClient:
         ):
             if event.type == "text_delta" and event.delta is not None:
                 text_chunks.append(event.delta)
+            elif event.type == "thinking_delta" and event.delta is not None:
+                thinking_chunks.append(event.delta)
             elif event.type == "tool_call_start":
                 tcid = event.tool_call_id or f"call_{len(tool_call_order)}"
                 if tcid not in tool_calls_acc:
@@ -262,6 +264,20 @@ async def _convert_chunk(chunk: Any, active_calls: dict[int, str]) -> AsyncItera
             )
             if content:
                 yield StreamEvent(type="text_delta", delta=content)
+            # Provider thinking / extended-reasoning chunks. Anthropic
+            # returns ``delta.thinking`` when extended thinking is on;
+            # OpenAI's o1-class models return ``delta.reasoning_content``.
+            # Without these branches, the reasoning text is silently
+            # dropped — paid for in tokens, lost on the floor.
+            thinking = getattr(delta, "thinking", None) or (
+                delta.get("thinking") if isinstance(delta, dict) else None
+            )
+            if not thinking:
+                thinking = getattr(delta, "reasoning_content", None) or (
+                    delta.get("reasoning_content") if isinstance(delta, dict) else None
+                )
+            if thinking:
+                yield StreamEvent(type="thinking_delta", delta=thinking)
             tool_calls = getattr(delta, "tool_calls", None) or (
                 delta.get("tool_calls") if isinstance(delta, dict) else None
             )
