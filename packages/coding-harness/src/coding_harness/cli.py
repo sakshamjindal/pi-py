@@ -20,6 +20,7 @@ from pyharness import (
 
 from .coding_agent import CodingAgent, CodingAgentConfig, NoProjectError
 from .config import Settings
+from .dotenv import load_env
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -75,6 +76,12 @@ def main(argv: list[str] | None = None) -> int:
         return _list_sessions(Path.cwd(), n=20, all_dirs=False)
 
     workspace = (args.workspace or Path.cwd()).resolve()
+
+    # Load .env files into the process env (workspace, project root,
+    # personal). Existing exports always win; this only fills in what's
+    # missing, so the same `pyharness` invocation works whether the user
+    # exported keys in their shell or just dropped them into `.env`.
+    load_env(workspace)
 
     if args.continue_:
         recent = Session.list_recent(workspace, n=1)
@@ -300,8 +307,56 @@ def _handle_init_cli(rest: list[str]) -> int:
         '{\n  "default_model": "claude-opus-4-7",\n  "max_turns": 100\n}\n',
         encoding="utf-8",
     )
-    sys.stdout.write(f"Initialised pyharness project at {pyharness_dir}\n")
+
+    # `.env.example` template + ensure `.env` is gitignored. The runtime
+    # CLI auto-loads `.env` from the workspace, the project root, and
+    # `~/.pyharness/.env`, so dropping a key here is enough.
+    _ensure_env_example(target)
+    _ensure_env_gitignored(target)
+
+    sys.stdout.write(
+        f"Initialised pyharness project at {pyharness_dir}\n"
+        f"Next: copy .env.example to .env and add a provider key, "
+        f"or `export OPENROUTER_API_KEY=...` in your shell.\n"
+    )
     return 0
+
+
+_ENV_EXAMPLE_TEMPLATE = """\
+# Copy this file to `.env` and fill in real values.
+# `.env` is gitignored; `.env.example` is committed.
+# pyharness auto-loads `.env` from the workspace, the project root,
+# and `~/.pyharness/.env` (in that order). Existing shell exports win.
+
+# Pick at least one provider key.
+# OPENROUTER_API_KEY=sk-or-v1-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+"""
+
+
+def _ensure_env_example(target: Path) -> None:
+    """Drop a `.env.example` if the project doesn't already have one."""
+
+    example = target / ".env.example"
+    if not example.exists():
+        example.write_text(_ENV_EXAMPLE_TEMPLATE, encoding="utf-8")
+
+
+def _ensure_env_gitignored(target: Path) -> None:
+    """Append `.env` to `.gitignore` if not already covered."""
+
+    gitignore = target / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    lines = {ln.strip() for ln in existing.splitlines()}
+    needed = [pat for pat in (".env", ".env.*") if pat not in lines]
+    if not needed:
+        return
+    suffix = "\n" if (existing and not existing.endswith("\n")) else ""
+    gitignore.write_text(
+        existing + suffix + "\n# pyharness secrets\n" + "\n".join(needed) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
