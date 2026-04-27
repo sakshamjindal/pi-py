@@ -14,3 +14,8 @@ venv/
 # Local-only scenario simulator. Lives in this directory for dev runs
 # but is intentionally not part of the repo.
 examples/simulations/
+
+# Local secrets / API keys. NEVER commit.
+.env
+.env.*
+!.env.example
