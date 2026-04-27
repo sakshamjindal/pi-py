@@ -26,9 +26,11 @@ class _FakeChoice:
 
 
 class _FakeDelta:
-    def __init__(self, content=None, tool_calls=None):
+    def __init__(self, content=None, tool_calls=None, thinking=None, reasoning_content=None):
         self.content = content
         self.tool_calls = tool_calls
+        self.thinking = thinking
+        self.reasoning_content = reasoning_content
 
 
 class _FakeToolCall:
@@ -128,3 +130,92 @@ async def test_streaming_yields_events(monkeypatch):
         types.append(ev.type)
     assert "text_delta" in types
     assert "message_stop" in types
+
+
+# ---------------------------------------------------------------------------
+# Thinking / extended-reasoning capture (regression: previously the chunks
+# were emitted by the provider but pyharness silently dropped them).
+# ---------------------------------------------------------------------------
+
+
+async def _fake_acompletion_anthropic_thinking(**kwargs):
+    """Mirror the shape Anthropic returns when extended thinking is on:
+    ``delta.thinking`` carries the reasoning chunks; ``delta.content``
+    carries the final text."""
+
+    async def gen():
+        yield _FakeChunk([_FakeChoice(_FakeDelta(thinking="Let me reason. "))])
+        yield _FakeChunk([_FakeChoice(_FakeDelta(thinking="Step 1: read. "))])
+        yield _FakeChunk([_FakeChoice(_FakeDelta(thinking="Step 2: reply."))])
+        yield _FakeChunk([_FakeChoice(_FakeDelta(content="The answer is 42."))])
+        yield _FakeChunk(
+            [_FakeChoice(_FakeDelta(content=None), finish_reason="stop")],
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+
+    return gen()
+
+
+async def _fake_acompletion_openai_reasoning(**kwargs):
+    """Mirror the shape OpenAI o1-class models return:
+    ``delta.reasoning_content`` carries the reasoning."""
+
+    async def gen():
+        yield _FakeChunk([_FakeChoice(_FakeDelta(reasoning_content="Reasoning chunk one. "))])
+        yield _FakeChunk([_FakeChoice(_FakeDelta(reasoning_content="Reasoning chunk two."))])
+        yield _FakeChunk([_FakeChoice(_FakeDelta(content="Final reply."))])
+        yield _FakeChunk(
+            [_FakeChoice(_FakeDelta(content=None), finish_reason="stop")],
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+
+    return gen()
+
+
+@pytest.mark.asyncio
+async def test_complete_captures_anthropic_thinking(monkeypatch):
+    """Anthropic-shape thinking chunks must accumulate into LLMResponse.thinking
+    and not bleed into LLMResponse.text."""
+
+    monkeypatch.setattr("litellm.acompletion", _fake_acompletion_anthropic_thinking, raising=False)
+    client = LLMClient()
+    response = await client.complete(
+        model="claude-opus-4-7",
+        messages=[Message(role="user", content="hi")],
+    )
+    assert response.thinking == "Let me reason. Step 1: read. Step 2: reply."
+    assert response.text == "The answer is 42."
+
+
+@pytest.mark.asyncio
+async def test_complete_captures_openai_reasoning_content(monkeypatch):
+    """OpenAI-o1-shape reasoning_content chunks must accumulate too."""
+
+    monkeypatch.setattr("litellm.acompletion", _fake_acompletion_openai_reasoning, raising=False)
+    client = LLMClient()
+    response = await client.complete(
+        model="o1-mini",
+        messages=[Message(role="user", content="hi")],
+    )
+    assert response.thinking == "Reasoning chunk one. Reasoning chunk two."
+    assert response.text == "Final reply."
+
+
+@pytest.mark.asyncio
+async def test_streaming_emits_thinking_delta_events(monkeypatch):
+    """The internal stream surfaces ``thinking_delta`` events so consumers
+    other than ``complete()`` (e.g. a future delta-streaming UI) can
+    distinguish reasoning chunks from final-text chunks."""
+
+    monkeypatch.setattr("litellm.acompletion", _fake_acompletion_anthropic_thinking, raising=False)
+    client = LLMClient()
+    types = []
+    async for ev in client.stream(
+        model="claude-opus-4-7",
+        messages=[Message(role="user", content="hi")],
+    ):
+        types.append(ev.type)
+    # Exactly one thinking_delta per source chunk that had thinking.
+    assert types.count("thinking_delta") == 3
+    # The final-text chunk also produced a text_delta.
+    assert types.count("text_delta") == 1

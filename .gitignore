@@ -10,3 +10,7 @@ venv/
 .coverage
 .ruff_cache/
 .mypy_cache/
+
+# Local-only scenario simulator. Lives in this directory for dev runs
+# but is intentionally not part of the repo.
+examples/simulations/

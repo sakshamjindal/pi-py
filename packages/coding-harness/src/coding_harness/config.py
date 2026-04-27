@@ -47,14 +47,29 @@ class Settings(BaseModel):
         if workspace is None:
             workspace = Path.cwd()
         ctx = WorkspaceContext(workspace=workspace, project_root=project_root, home=home)
+        import sys as _sys
+
         merged: dict[str, Any] = {}
         for path in ctx.collect_settings_files():
             try:
-                obj = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+                raw = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                _sys.stderr.write(f"[settings] cannot read {path}: {exc}\n")
                 continue
-            if isinstance(obj, dict):
-                merged = _deep_merge(merged, obj)
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                _sys.stderr.write(
+                    f"[settings] {path} is not valid JSON ({exc.msg} at line {exc.lineno}); "
+                    f"using defaults instead.\n"
+                )
+                continue
+            if not isinstance(obj, dict):
+                _sys.stderr.write(
+                    f"[settings] {path} is valid JSON but not a top-level object; ignoring.\n"
+                )
+                continue
+            merged = _deep_merge(merged, obj)
         if cli_overrides:
             merged = _deep_merge(merged, {k: v for k, v in cli_overrides.items() if v is not None})
         return cls.model_validate(merged)

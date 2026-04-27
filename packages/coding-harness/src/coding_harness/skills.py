@@ -212,6 +212,22 @@ class LoadSkillTool(Tool):
                 message=f"Unknown skill: {args.name!r}. Known: {sorted(skills.keys())}",
             )
 
+        # Idempotency: if the model re-invokes load_skill on a skill
+        # already loaded this session, return early with a short reminder
+        # instead of re-importing the module and re-injecting the body
+        # (which would waste tokens and could trigger duplicate hook
+        # registration in skill bundles).
+        if skill.name in self.loaded_names:
+            return LoadSkillResult(
+                loaded=True,
+                instructions="",
+                tools_added=[],
+                message=(
+                    f"Skill {skill.name!r} is already loaded in this session. "
+                    "Its tools and instructions are already available. Proceed without re-loading."
+                ),
+            )
+
         added: list[str] = []
         if skill.tools_module is not None:
             for tool in load_tools_from_module(skill.tools_module):
