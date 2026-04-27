@@ -52,12 +52,15 @@ async def _run_once(prompt: str, agent: CodingAgent) -> int:
     result = await agent.run(prompt)
     sys.stdout.write((result.final_output or "").rstrip() + "\n")
     sys.stdout.flush()
+    # Always print a per-turn summary so the user sees turns + reason
+    # even when cost is unavailable (e.g. the OpenRouter route returns
+    # tokens but no cost). For richer per-call audit trails (token
+    # counts, latency, etc.) install the cost_logger extension and
+    # check `.pyharness/cost.jsonl`.
+    parts = [f"turns={result.turn_count}", f"reason={result.reason}"]
     if result.cost > 0:
-        sys.stderr.write(
-            f"[turns={result.turn_count} cost=${result.cost:.4f} reason={result.reason}]\n"
-        )
-    elif not result.completed:
-        sys.stderr.write(f"[reason={result.reason}]\n")
+        parts.append(f"cost=${result.cost:.4f}")
+    sys.stderr.write(f"[{' '.join(parts)}]\n")
     return 0 if result.completed else 1
 
 

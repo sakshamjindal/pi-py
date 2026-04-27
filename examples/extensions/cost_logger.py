@@ -1,12 +1,28 @@
 """Token-cost logger extension.
 
-Subscribes to ``after_llm_call``, accumulates token usage and dollar cost,
-and writes a JSONL record per call to a file in the workspace's
-``.pyharness/`` directory.
+Subscribes to ``after_llm_call``, captures per-call token usage and
+dollar cost from the LLM response, and writes a JSONL record per call
+to ``<workspace>/.pyharness/cost.jsonl``.
 
-Usage: drop this file into ``~/.pyharness/extensions/`` or
-``<project>/.pyharness/extensions/``. The harness loads it automatically
-unless ``--bare`` is passed.
+This is the canonical observability pattern in pyharness: the kernel
+session log records *what happened* (messages, tool calls, sequence
+numbers); cross-cutting concerns like cost / latency / audit trails
+ride on the event bus and persist via extensions like this one. The
+session log stays minimal; observability is opt-in.
+
+Usage:
+
+  1. Drop this file into ``~/.pyharness/extensions/`` or
+     ``<project>/.pyharness/extensions/``.
+  2. Enable it via the named agent's frontmatter:
+         extensions:
+           - cost_logger
+     ...or programmatically via ``CodingAgentConfig.extensions_enabled=["cost_logger"]``.
+     Extensions are NEVER auto-loaded — see DESIGN.md principle 7.
+
+Then ``cat .pyharness/cost.jsonl`` to see one record per LLM call:
+``{"timestamp", "session_id", "prompt_tokens", "completion_tokens",
+"cached_tokens", "cost_usd"}``.
 """
 
 from __future__ import annotations
