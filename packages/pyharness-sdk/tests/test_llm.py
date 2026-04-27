@@ -277,3 +277,140 @@ async def test_unknown_provider_does_not_block(monkeypatch):
         messages=[Message(role="user", content="hi")],
     )
     assert response.text  # made it past the guard
+
+
+# ---------------------------------------------------------------------------
+# Cost telemetry
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_cost_returns_nonzero_for_known_model():
+    """LiteLLM ships a pricing table; a known Anthropic model must
+    resolve to a non-zero cost when given non-zero tokens. This is the
+    regression test for the silent-zero bug fixed in this commit."""
+
+    from pyharness.llm import _resolve_cost
+    from pyharness.types import TokenUsage
+
+    cost = _resolve_cost(
+        "claude-haiku-4-5",
+        TokenUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
+    )
+    assert cost > 0, "expected a non-zero cost for a known-priced model"
+
+
+def test_resolve_cost_strips_provider_prefix():
+    """OpenRouter-prefixed Anthropic models must resolve to the same
+    cost as the underlying Anthropic model. We strip the routing
+    prefix before LiteLLM's pricing lookup — LiteLLM strips prefixes
+    for *routing* but not for cost lookup."""
+
+    from pyharness.llm import _resolve_cost
+    from pyharness.types import TokenUsage
+
+    usage = TokenUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
+    direct = _resolve_cost("claude-haiku-4-5", usage)
+    via_or = _resolve_cost("openrouter/anthropic/claude-haiku-4-5", usage)
+    assert direct > 0
+    assert via_or > 0
+    # Same underlying model ⇒ same price.
+    assert abs(direct - via_or) < 1e-9
+
+
+def test_resolve_cost_normalises_dot_versions_for_anthropic():
+    """OpenRouter exposes Anthropic models with dot-separated versions
+    (``claude-haiku-4.5``); LiteLLM's pricing table uses dashes
+    (``claude-haiku-4-5``). They refer to the same model. The resolver
+    must map between them so callers using OpenRouter's natural id
+    form actually get non-zero cost — this is the regression test for
+    the silent-zero we hit in real CLI runs."""
+
+    from pyharness.llm import _resolve_cost
+    from pyharness.types import TokenUsage
+
+    usage = TokenUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
+    cost = _resolve_cost("openrouter/anthropic/claude-haiku-4.5", usage)
+    assert cost > 0, (
+        "OpenRouter-style dot version (`claude-haiku-4.5`) must resolve "
+        "to the same price as the dash form. Got 0.0 — pricing lookup is broken."
+    )
+
+
+def test_resolve_cost_zero_when_no_tokens():
+    """No tokens ⇒ no cost. Don't hit the pricing table for an empty call."""
+
+    from pyharness.llm import _resolve_cost
+    from pyharness.types import TokenUsage
+
+    assert _resolve_cost("claude-haiku-4-5", TokenUsage()) == 0.0
+
+
+def test_resolve_cost_excludes_cached_tokens(monkeypatch):
+    """Cached tokens are charged at a discount by the provider, but the
+    important invariant for our resolver is: we hand LiteLLM the
+    non-cached prompt-token count so we don't double-charge for a
+    cached prefix. This test pins that wire-up by stubbing
+    cost_per_token and checking what we passed."""
+
+    captured: dict = {}
+
+    def fake_cost_per_token(*, model, prompt_tokens, completion_tokens, **_):
+        captured["model"] = model
+        captured["prompt_tokens"] = prompt_tokens
+        captured["completion_tokens"] = completion_tokens
+        return (0.001, 0.002)
+
+    monkeypatch.setattr("litellm.cost_per_token", fake_cost_per_token, raising=False)
+
+    from pyharness.llm import _resolve_cost
+    from pyharness.types import TokenUsage
+
+    _resolve_cost(
+        "claude-haiku-4-5",
+        TokenUsage(
+            prompt_tokens=1000,
+            completion_tokens=200,
+            total_tokens=1200,
+            cached_tokens=300,
+        ),
+    )
+    assert captured["prompt_tokens"] == 700, (
+        "non-cached prompt tokens should be billed; cached prefix is separate"
+    )
+    assert captured["completion_tokens"] == 200
+
+
+@pytest.mark.asyncio
+async def test_complete_populates_cost_usd(monkeypatch):
+    """End-to-end: the LLMResponse returned from ``complete()`` must
+    have a non-zero ``cost_usd`` for a known-priced model. Before the
+    fix, this was always 0.0 because we read a field LiteLLM doesn't
+    populate on streaming chunks."""
+
+    monkeypatch.setattr("litellm.acompletion", _fake_acompletion_text, raising=False)
+    client = LLMClient()
+    response = await client.complete(
+        model="claude-haiku-4-5",
+        messages=[Message(role="user", content="hi")],
+    )
+    assert response.usage.total_tokens > 0
+    assert response.usage.cost_usd > 0, (
+        "complete() must finalise cost from token counts; "
+        f"got total_tokens={response.usage.total_tokens} cost={response.usage.cost_usd}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_warns_on_unknown_model(monkeypatch, capsys):
+    """A model with no pricing entry should produce a stderr note so
+    silent zeros become visible, but must not raise."""
+
+    monkeypatch.setattr("litellm.acompletion", _fake_acompletion_text, raising=False)
+    client = LLMClient()
+    response = await client.complete(
+        model="some-totally-unknown-model-that-litellm-has-never-heard-of",
+        messages=[Message(role="user", content="hi")],
+    )
+    assert response.usage.cost_usd == 0.0
+    captured = capsys.readouterr()
+    assert "[llm]" in captured.err
