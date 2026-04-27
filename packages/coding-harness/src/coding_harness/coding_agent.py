@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date as _date
 from pathlib import Path
 from typing import Any
 
@@ -48,14 +49,59 @@ from .tools.builtin import builtin_registry
 from .workspace import WorkspaceContext
 
 BASE_SYSTEM_PROMPT = (
-    "You are an LLM-driven agent running in a headless harness. You receive "
-    "a task and complete it by calling the tools available to you. When the "
-    "task is done, reply with a final answer and no tool calls.\n\n"
-    "Operating principles:\n"
-    "- Be concise in user-facing replies. Provide concrete output, not narration.\n"
-    "- Prefer one tool call at a time when reasoning is involved.\n"
-    "- If a tool returns an error, read the message and adjust before retrying.\n"
+    "You are an expert coding assistant operating inside pyharness, a coding "
+    "agent harness. You help users by reading files, executing commands, "
+    "editing code, and writing new files."
 )
+
+
+# Always-included guideline bullets, mirroring pi-mono's coding-agent
+# defaults. The list is intentionally minimal — project-specific tone
+# and policy belongs in ``AGENTS.md``, not here.
+_BASE_GUIDELINES: tuple[str, ...] = (
+    "Be concise in your responses",
+    "Show file paths clearly when working with files",
+)
+
+
+def _short_snippet(description: str, max_len: int = 80) -> str:
+    """Render a one-line tool snippet from a (possibly multi-paragraph)
+    description. Takes the first sentence, collapses whitespace, drops
+    trailing punctuation, and truncates."""
+
+    text = " ".join(description.split())
+    # First sentence boundary that isn't an abbreviation or decimal.
+    for sep in (". ", ".\n"):
+        idx = text.find(sep)
+        if idx != -1:
+            text = text[:idx]
+            break
+    text = text.rstrip(".").rstrip()
+    if len(text) > max_len:
+        text = text[: max_len - 1].rstrip() + "…"
+    return text
+
+
+def _format_tools_list(registry: ToolRegistry) -> str:
+    lines = []
+    for tool in registry:
+        snippet = _short_snippet(tool.description or "")
+        lines.append(f"- {tool.name}: {snippet}" if snippet else f"- {tool.name}")
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _file_search_guideline(registry: ToolRegistry) -> str | None:
+    """Pi-mono's conditional 'prefer specialised search tools over bash'
+    bullet. Only emits when both are available."""
+
+    has_bash = registry.has("bash")
+    has_specialised = any(registry.has(name) for name in ("grep", "glob"))
+    if has_bash and has_specialised:
+        return (
+            "Prefer grep/glob/read tools over bash for file exploration "
+            "(faster, respects ignore rules, less context noise)"
+        )
+    return None
 
 
 class NoProjectError(RuntimeError):
@@ -284,16 +330,62 @@ class CodingAgent:
             self.tool_registry = builtin_registry()
 
     def _build_system_prompt(self) -> str:
-        parts = [BASE_SYSTEM_PROMPT.strip()]
+        """Assemble the system prompt in pi-mono's structure:
+
+            1. Header (``BASE_SYSTEM_PROMPT``)
+            2. ``Available tools:`` block — one line per registered tool
+            3. ``Guidelines:`` block — base bullets + tool-conditional ones
+            4. AGENTS.md content (already labelled per-file by the workspace)
+            5. Named-agent body (frontmatter ``.md``)
+            6. Skills index (``Available skills`` block)
+            7. ``Current date:`` + ``Current working directory:`` footer
+
+        Sections 4-6 are conditional on whether the harness has anything
+        to put in them.
+        """
+
+        parts: list[str] = [BASE_SYSTEM_PROMPT.strip()]
+
+        # 2. Available tools — gives the model an at-a-glance view without
+        # forcing it to infer from JSON schemas. Mirrors pi-mono's pattern.
+        parts.append(
+            f"Available tools:\n{_format_tools_list(self.tool_registry)}\n\n"
+            "In addition to the tools above, you may have access to "
+            "other custom tools depending on the project."
+        )
+
+        # 3. Guidelines — base bullets plus tool-conditional ones. Kept short
+        # by design; project policy goes in AGENTS.md.
+        guidelines: list[str] = []
+        bash_search = _file_search_guideline(self.tool_registry)
+        if bash_search:
+            guidelines.append(bash_search)
+        guidelines.extend(_BASE_GUIDELINES)
+        parts.append("Guidelines:\n" + "\n".join(f"- {g}" for g in guidelines))
+
+        # 4. AGENTS.md (labelled per-file by ``render_agents_md``).
         if not self.config.bare:
             agents_md = self.workspace_ctx.render_agents_md()
             if agents_md:
                 parts.append(agents_md.strip())
+
+        # 5. Named-agent body.
         if self.agent_def is not None and self.agent_def.body.strip():
             parts.append(self.agent_def.body.strip())
+
+        # 6. Skills catalog.
         skill_index = build_skill_index(self.skills)
         if skill_index:
             parts.append(skill_index.strip())
+
+        # 7. Date + cwd footer. The model otherwise has no way to know
+        # either, which matters for time-sensitive tasks and for resolving
+        # relative paths.
+        parts.append(
+            f"Current date: {_date.today().isoformat()}\n"
+            f"Current working directory: {self.workspace_ctx.workspace}"
+        )
+
         return "\n\n".join(parts)
 
     async def _on_skill_loaded(self, skill: SkillDefinition, added: list[str]) -> None:
