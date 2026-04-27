@@ -22,8 +22,8 @@ class Settings(BaseModel):
     max_turns: int = 100
     compaction_threshold_pct: float = 0.8
     keep_recent_count: int = 20
-    search_provider: str = "brave"
-    search_api_key_env: str = "BRAVE_API_KEY"
+    search_provider: str = "tavily"
+    search_api_key_env: str = "TAVILY_API_KEY"
     fetch_timeout_seconds: int = 30
     bash_timeout_seconds: int = 120
     tool_output_max_bytes: int = 51_200
