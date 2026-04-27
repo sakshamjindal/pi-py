@@ -73,6 +73,7 @@ class BashTool(Tool):
         "A small set of catastrophic patterns (e.g. `rm -rf /`) is blocked."
     )
     args_schema = BashArgs
+    execution_mode = "sequential"
 
     async def execute(self, args: BashArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         block = check_hard_blocks(args.command)

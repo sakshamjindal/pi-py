@@ -24,6 +24,10 @@ this kernel.
   - [Live Steering](#live-steering)
   - [Extensions](#extensions)
 - [What's in the Box](#whats-in-the-box)
+- [Tool Execution: Parallel vs Sequential](#tool-execution-parallel-vs-sequential)
+- [Terminate Signal](#terminate-signal)
+- [Resuming After an Error](#resuming-after-an-error)
+- [Kernel vs Lifecycle](#kernel-vs-lifecycle)
 - [Lifecycle Events](#lifecycle-events)
 - [What's Not Here (Deliberately)](#whats-not-here-deliberately)
 - [Termination](#termination)
@@ -63,17 +67,25 @@ loop. One turn:
         no tool_calls           tool_calls present
                   │                   │
                   v                   v
-            return RunResult    for each call:
-                                 emit before_tool_call ─ extension can deny / replace
+            return RunResult    ── tool batch dispatch (3 phases) ──
+                                ① preflight  (sequential, always)
+                                   for each call:
+                                     emit before_tool_call ─ extension can deny / replace
+                                ② execute    (parallel or sequential)
+                                   parallel iff: tool_execution="parallel"
+                                                AND no tool in batch is execution_mode="sequential"
+                                                AND len(runnable) > 1
+                                   else sequential, with mid-batch steering check
+                                   each call: validate args (Pydantic) → run → after_tool_call
+                                ③ persist    (assistant source order)
+                                   tool messages appended in original tool_call order,
+                                   regardless of completion order
                                        │
                                        v
-                                 execute_tool (validate args via Pydantic)
-                                       │
-                                       v
-                                 emit after_tool_call
-                                       │
-                                       v
-                                 if steering queue not empty: break, drain, retry turn
+                                 if every tool returned terminate=True:
+                                     skip next LLM call, return RunResult
+                                 else if steering queue not empty:
+                                     drain, re-run turn (no turn_end)
                             │
                             v
                   emit turn_end → next turn
@@ -161,6 +173,7 @@ result = await handle.wait()
 | `steer(text)` | Consumed at the top of the next turn |
 | `follow_up_msg(text)` | Consumed between turns |
 | `abort_event.set()` | Cuts the run after the in-flight tool call finishes |
+| `continue_run()` | Resume after the run ended in `error` or was aborted — keeps the same transcript and cache prefix; see [Resuming After an Error](#resuming-after-an-error) |
 
 ### Extensions
 
@@ -193,9 +206,10 @@ The first non-`Continue` outcome wins.
 
 | Symbol | Role |
 |---|---|
-| `Agent`, `AgentOptions`, `AgentHandle` | The loop, its config, and live-steering handle |
+| `Agent`, `AgentOptions`, `AgentHandle` | The lifecycle wrapper, its config, and live-steering handle. `AgentOptions.tool_execution` selects parallel or sequential dispatch. |
+| `agent_loop`, `agent_loop_continue`, `LoopConfig`, `LoopResult` | The free-function kernel underneath `Agent`. Use these directly when you need a different lifecycle (sub-agents, web embeddings, tests) — see [Kernel vs Lifecycle](#kernel-vs-lifecycle). |
 | `LLMClient`, `LLMError`, `count_tokens` | Thin LiteLLM wrapper. Streaming canonical; `complete()` consumes the stream. Anthropic prompt caching applied automatically for Claude models. |
-| `Tool`, `ToolRegistry`, `ToolContext`, `ToolError`, `execute_tool`, `safe_path` | The contract any tool must satisfy. Pydantic-validated args. |
+| `Tool`, `ToolRegistry`, `ToolContext`, `ToolError`, `ToolResult`, `execute_tool`, `safe_path` | The contract any tool must satisfy. Pydantic-validated args. `Tool.execution_mode` (`"parallel"` default, `"sequential"`) opts out of concurrent dispatch. `ToolResult(content, terminate=True)` short-circuits the next LLM call — see [Terminate Signal](#terminate-signal). |
 | `Session`, `SessionInfo` | Append-only JSONL log; `new` / `resume` / `fork` / `read_messages`. |
 | `MessageQueue` | Steering and follow-up queues, exposed through `AgentHandle`. |
 | `EventBus`, `ExtensionAPI`, `HookOutcome`, `HookResult`, `HandlerContext`, `LifecycleEvent` | Extension runtime types. |
@@ -205,6 +219,147 @@ The first non-`Continue` outcome wins.
 
 For the complete export list see
 [`src/pyharness/__init__.py`](src/pyharness/__init__.py).
+
+---
+
+## Tool Execution: Parallel vs Sequential
+
+When the LLM emits multiple tool calls in one assistant message, the
+loop can run them concurrently. The default is sequential to match
+historical behaviour; opt in per agent:
+
+```python
+AgentOptions(model="claude-opus-4-7", tool_execution="parallel")
+```
+
+Three-phase dispatch preserves correctness:
+
+1. **Preflight, sequentially.** Each call runs through `before_tool_call`
+   hooks and arg validation. Failures and denials become "immediate"
+   results without an executor.
+2. **Execute, concurrently.** `asyncio.gather` over the runnable calls.
+   The session log is fsync-locked, so JSONL ordering remains correct
+   despite parallel completion.
+3. **Persist, in source order.** Tool result messages are appended to
+   the transcript in the original `tool_call` order. The next LLM call
+   sees a deterministic prefix — important for cache hits.
+
+**Per-tool override.** Tools that mutate shared state should be marked
+sequential:
+
+```python
+class WriteTool(Tool):
+    name = "write"
+    execution_mode = "sequential"   # forces the whole batch to serialise
+```
+
+If *any* runnable call in a batch targets a sequential tool, the entire
+batch executes sequentially regardless of the global flag — there's no
+way for the model to interleave a parallel `read` between two sequential
+`edit`s. Built-in mutating tools (`bash`, `edit`, `write`) are tagged
+sequential out of the box.
+
+**Steering caveat.** In sequential mode the loop checks the steering
+queue between each tool call. In parallel mode the check happens only at
+the batch boundary — there's no safe way to interrupt an in-flight
+`gather`. Pick parallel when wall-clock matters more than mid-batch
+preemption.
+
+---
+
+## Terminate Signal
+
+A tool can hint that the next LLM call should be skipped — useful for
+terminal-by-intent tools like `submit_answer`, `notify_done`, or
+`await_human_approval`:
+
+```python
+from pyharness import Tool, ToolResult
+
+class DoneTool(Tool):
+    name = "done"
+    args_schema = _DoneArgs
+
+    async def execute(self, args, ctx):
+        return ToolResult(content="acknowledged", terminate=True)
+```
+
+The loop only short-circuits when **every** runnable tool in the batch
+sets `terminate=True`. Mixed batches (one terminal tool, one read tool)
+continue normally so the model still sees the read result.
+
+This saves one cached-prefill turn per terminal tool call: without it
+the loop unconditionally calls the LLM again to react to the result,
+even when the call is "Okay, I'm done."
+
+---
+
+## Resuming After an Error
+
+When a run ends with `reason="error"` (LLM raised, network blip, rate
+limit) or `reason="aborted"` (user hit cancel), the transcript still
+ends in a clean `user` or `tool` message — exactly the state needed to
+retry. `continue_run()` resumes from there without sending a new prompt
+and without polluting the cache prefix:
+
+```python
+result = await agent.run("do the thing")
+if result.reason == "error":
+    result = await agent.continue_run()   # retry with the same context
+```
+
+Available on both `Agent.continue_run()` and the live-run handle:
+
+```python
+handle = agent.start("do the thing")
+done = await handle.wait()
+if done.reason == "error":
+    done = await handle.continue_run()    # resets abort, runs the kernel again
+```
+
+Precondition: the last non-system message must be `user` or `tool`.
+Continuing from an `assistant` message would either send a malformed
+request or duplicate the previous response, so the call refuses with
+`ValueError`.
+
+---
+
+## Kernel vs Lifecycle
+
+`Agent` is a thin wrapper. The actual loop lives in
+`pyharness.agent_loop` as two free coroutines:
+
+```python
+from pyharness import agent_loop, agent_loop_continue, LoopConfig
+```
+
+`Agent` builds the dependencies the kernel expects (a session
+appender, a lifecycle emitter, queue drainers, an abort event, a
+file-written list) and forwards calls. Embedders who want a
+different lifecycle — sub-agents that share a parent's session, web
+embeddings without local disk, tests that just collect events into a
+list — can call the kernel directly:
+
+```python
+result = await agent_loop(
+    initial_prompt="hi",
+    messages=messages,                 # mutated in place
+    config=LoopConfig(...),
+    tool_registry=registry,
+    llm=LLMClient(),
+    session_appender=my_writer,        # any AgentEvent → Awaitable
+    emit_lifecycle=my_lifecycle,       # (name, payload) → Awaitable[HookOutcome]
+    drain_steering=my_steering_drain,  # () → Awaitable[list[str]]
+    drain_followup=my_followup_drain,
+    abort_event=asyncio.Event(),
+    files_written=[],
+    user_message_event_factory=lambda c: UserMessageEvent(...),
+)
+```
+
+The kernel never touches disk, never owns queues, never registers
+listeners. Use `Agent` when you want the standard durable-session
+lifecycle; use the kernel directly when you don't.
 
 ---
 
@@ -254,9 +409,10 @@ The loop terminates when:
 | Condition | `RunResult.reason` |
 |---|---|
 | LLM returns no tool calls | `"completed"` (with `completed=True`) |
+| Every tool in the batch returned `terminate=True` | `"completed"` (with `completed=True`) |
 | `max_turns` reached | `"max_turns"` |
 | `AgentHandle.abort_event.set()` called | `"aborted"` |
-| LLM call raises or extension denies a turn | `"error"` |
+| LLM call raises or extension denies a turn | `"error"` (resumable via `continue_run()`) |
 
 `RunResult` is a Pydantic model — `final_output`, `reason`,
 `completed`, plus token / cost accounting in `usage`.

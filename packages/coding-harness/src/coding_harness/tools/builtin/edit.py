@@ -21,6 +21,7 @@ class EditTool(Tool):
         "and you must add surrounding context to disambiguate."
     )
     args_schema = EditArgs
+    execution_mode = "sequential"
 
     async def execute(self, args: EditArgs, ctx: ToolContext) -> str:  # type: ignore[override]
         p = safe_path(ctx.workspace, args.path)

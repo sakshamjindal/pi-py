@@ -8,6 +8,7 @@ in the ``harness`` package.
 
 from __future__ import annotations
 
+from .agent_loop import LoopConfig, LoopResult, agent_loop, agent_loop_continue
 from .compaction import CompactionResult, Compactor
 from .events import (
     AgentEvent,
@@ -41,6 +42,7 @@ from .tools.base import (
     ToolError,
     ToolExecutionResult,
     ToolRegistry,
+    ToolResult,
     execute_tool,
     safe_path,
 )
@@ -74,6 +76,8 @@ __all__ = [
     "LLMError",
     "LLMResponse",
     "LifecycleEvent",
+    "LoopConfig",
+    "LoopResult",
     "Message",
     "MessageQueue",
     "RunResult",
@@ -93,8 +97,11 @@ __all__ = [
     "ToolError",
     "ToolExecutionResult",
     "ToolRegistry",
+    "ToolResult",
     "UserMessageEvent",
     "__version__",
+    "agent_loop",
+    "agent_loop_continue",
     "count_tokens",
     "execute_tool",
     "parse_event",

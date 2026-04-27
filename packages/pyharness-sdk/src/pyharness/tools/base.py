@@ -11,7 +11,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -38,6 +38,11 @@ class Tool(ABC):
     description: ClassVar[str] = ""
     args_schema: ClassVar[type[BaseModel]]
     result_schema: ClassVar[type[BaseModel] | None] = None
+    # "parallel" means the tool is safe to run concurrently with other
+    # tool calls in the same batch. "sequential" forces the whole batch
+    # to serialise — pick this for tools that mutate shared state (Edit,
+    # Write, Bash) or are otherwise non-reentrant.
+    execution_mode: ClassVar[Literal["parallel", "sequential"]] = "parallel"
 
     @abstractmethod
     async def execute(self, args: BaseModel, ctx: ToolContext) -> Any:
@@ -118,6 +123,20 @@ class ToolRegistry:
 
 
 @dataclass
+class ToolResult:
+    """Optional rich return type for tools.
+
+    Tools may return any value (string, dict, Pydantic model) — those are
+    serialised as before. They may also return a ``ToolResult`` to attach
+    metadata: ``terminate=True`` hints the loop to skip the next LLM call
+    when *every* tool in the batch sets it (matches pi-mono semantics).
+    """
+
+    content: Any
+    terminate: bool = False
+
+
+@dataclass
 class ToolExecutionResult:
     ok: bool
     content: str
@@ -126,6 +145,7 @@ class ToolExecutionResult:
     overflow_path: str | None = None
     raw_result: Any = None
     duration_ms: float = 0.0
+    terminate: bool = False
 
 
 async def execute_tool(
@@ -188,6 +208,11 @@ async def execute_tool(
             duration_ms=(asyncio.get_event_loop().time() - started) * 1000,
         )
 
+    terminate = False
+    if isinstance(raw, ToolResult):
+        terminate = raw.terminate
+        raw = raw.content
+
     text = _stringify(raw)
     truncated = False
     overflow_path: str | None = None
@@ -205,6 +230,7 @@ async def execute_tool(
         overflow_path=overflow_path,
         raw_result=raw,
         duration_ms=(asyncio.get_event_loop().time() - started) * 1000,
+        terminate=terminate,
     )
 
 
