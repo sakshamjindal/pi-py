@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from coding_harness import CodingAgent, CodingAgentConfig, NoProjectError
+from coding_harness.dotenv import load_env
 
 # Per-tool argument-preview rules. The first key in the list whose
 # value is a non-empty string is rendered after the tool name. For
@@ -189,6 +190,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     workspace = (args.workspace or Path.cwd()).resolve()
+
+    # Mirror the `pyharness` CLI: auto-load .env files so that a fresh
+    # terminal (no prior `source .env` or shell exports) picks up API
+    # keys before the first LLM call.
+    load_env(workspace)
 
     if args.prompt:
         agent = _build_agent(workspace, bare=args.bare, model=args.model)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 
 from coding_harness.coding_agent import CodingAgent
 from pyharness import LLMResponse
@@ -38,6 +39,41 @@ def test_one_shot_with_mocked_llm(tmp_path, monkeypatch, isolated_session_dir, c
     out = capsys.readouterr().out
     assert rc == 0
     assert "all done" in out
+
+
+def test_main_loads_dotenv_before_agent_construction(tmp_path, monkeypatch, isolated_session_dir):
+    """Regression: pyharness-tui must auto-load .env files (mirroring the
+    pyharness CLI) so that a fresh terminal without shell exports picks up
+    API keys before the first LLM call."""
+
+    (tmp_path / ".pyharness").mkdir()
+    (tmp_path / ".env").write_text(
+        "PI_TUI_DOTENV_TEST=loaded-from-workspace-env\n", encoding="utf-8"
+    )
+
+    monkeypatch.delenv("PI_TUI_DOTENV_TEST", raising=False)
+    monkeypatch.setenv("PYHARNESS_HOME", str(tmp_path / "nonexistent-home"))
+
+    real_init = CodingAgent.__init__
+
+    def patched_init(self, config):
+        # By the time the agent is being constructed, load_env must
+        # already have populated the env var from the workspace .env.
+        assert os.environ.get("PI_TUI_DOTENV_TEST") == "loaded-from-workspace-env"
+        real_init(self, config)
+
+        async def _complete(**_):
+            return LLMResponse(text="dotenv-ok")
+
+        self.llm.complete = _complete  # type: ignore
+
+    monkeypatch.setattr(CodingAgent, "__init__", patched_init)
+    monkeypatch.chdir(tmp_path)
+
+    from pyharness_tui.cli import main
+
+    rc = main(["do", "x"])
+    assert rc == 0
 
 
 def test_repl_exits_on_eof(tmp_path, monkeypatch, isolated_session_dir):
