@@ -1,14 +1,12 @@
 # pi-py
 
-**A headless Python agent harness for building LLM-backed coding agents.**
+> **About**
+>
+> (yet another harness!) pi-py is your own minimal claude code and python agent harness implementation inspired from Pi-mono and programmable alternative to Claude Code
+
+**A headless Python agent harness.**
 Supports Claude, Anthropic, OpenAI, and any LiteLLM provider. Embeddable agent SDK,
-AGENTS.md, SKILL.md plugins, opt-in extensions via Python entry points. The
-Python answer to [pi-mono](https://github.com/badlogic/pi-mono); a programmable
-alternative to [Claude Code](https://docs.claude.com/en/docs/claude-code)
-for autonomous, long-running, SDK-driven use cases where the harness
-is one component of a larger system rather than a chat product used
-directly by humans. The coding harness is a general-purpose harness for
-autonomous agents, not limited to coding tasks.
+AGENTS.md, SKILL.md plugins, opt-in extensions via Python entry points.
 
 The intent is that **domain-specific harnesses are built on top of
 pi-py** rather than reinventing the loop, the session log, the tool
