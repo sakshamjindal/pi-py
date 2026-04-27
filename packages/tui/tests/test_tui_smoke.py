@@ -258,3 +258,61 @@ def test_repl_carries_session_across_prompts(tmp_path, monkeypatch, isolated_ses
     assert len(log_files) == 1, (
         f"expected 1 session file across both prompts, got {len(log_files)}: {log_files}"
     )
+
+
+# ---------------------------------------------------------------------------
+# _format_tool_trace
+# ---------------------------------------------------------------------------
+
+
+def test_format_tool_trace_bare_tool_name_when_no_args():
+    from pyharness_tui.cli import _format_tool_trace
+
+    assert _format_tool_trace("read", None) == "  → read"
+    assert _format_tool_trace("read", {}) == "  → read"
+
+
+def test_format_tool_trace_uses_per_tool_preview_key():
+    """Each well-known tool has a designated 'most informative' argument
+    that gets shown after the tool name. Read uses path; bash uses
+    command; grep uses pattern."""
+
+    from pyharness_tui.cli import _format_tool_trace
+
+    assert _format_tool_trace("read", {"path": "config.json"}) == "  → read config.json"
+    assert _format_tool_trace("bash", {"command": "ls -la"}) == "  → bash ls -la"
+    assert _format_tool_trace("grep", {"pattern": "TODO"}) == "  → grep TODO"
+    assert _format_tool_trace("web_fetch", {"url": "https://x"}) == "  → web_fetch https://x"
+
+
+def test_format_tool_trace_falls_back_to_first_scalar_for_unknown_tool():
+    """Tools without explicit preview rules show the first scalar
+    argument so the user still sees *something* useful."""
+
+    from pyharness_tui.cli import _format_tool_trace
+
+    line = _format_tool_trace("custom_tool", {"target": "thing", "options": {"x": 1}})
+    assert line == "  → custom_tool thing"
+
+
+def test_format_tool_trace_truncates_long_previews():
+    """Multi-line bash commands or huge URLs would otherwise blow up
+    one TUI line into many. Keep the trace one line and bounded."""
+
+    from pyharness_tui.cli import _format_tool_trace
+
+    long_cmd = "echo " + ("x" * 500)
+    line = _format_tool_trace("bash", {"command": long_cmd})
+    # One line, well under (length + ellipsis tolerance).
+    assert "\n" not in line
+    assert len(line) < 120
+
+
+def test_format_tool_trace_collapses_whitespace():
+    """Newlines/tabs in tool arguments must not break the trace line."""
+
+    from pyharness_tui.cli import _format_tool_trace
+
+    line = _format_tool_trace("bash", {"command": "echo hello\n\tworld\n  &&  ls"})
+    assert "\n" not in line
+    assert "echo hello world && ls" in line
