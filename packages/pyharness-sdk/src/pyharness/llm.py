@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -197,6 +198,12 @@ class LLMClient:
                 ToolCall(id=entry["id"], name=entry.get("name") or "", arguments=args)
             )
 
+        # Finalise cost. Streaming chunks don't carry a populated ``cost``
+        # field, so ``_extract_usage`` left it at 0.0; resolve it now from
+        # the model id and accumulated token counts.
+        if usage.cost_usd == 0.0 and usage.total_tokens > 0:
+            usage = usage.model_copy(update={"cost_usd": _resolve_cost(model, usage)})
+
         return LLMResponse(
             text="".join(text_chunks),
             thinking="".join(thinking_chunks),
@@ -376,8 +383,82 @@ def _extract_usage(raw: Any) -> TokenUsage:
         completion_tokens=int(_g(raw, "completion_tokens", 0) or 0),
         total_tokens=int(_g(raw, "total_tokens", 0) or 0),
         cached_tokens=int(cached or 0),
+        # Streaming chunks don't carry a populated ``cost`` field; the
+        # caller resolves cost via ``_resolve_cost`` once the stream
+        # finishes and the model id is in scope.
         cost_usd=float(_g(raw, "cost", 0.0) or 0.0),
     )
+
+
+def _pricing_lookup_id(model: str) -> str:
+    """Map our model id to the form LiteLLM's pricing table is keyed on.
+
+    Two transformations:
+
+    1. **Strip routing prefixes.** LiteLLM uses ``openrouter/anthropic/...``
+       for routing but keys its pricing table on the underlying provider
+       model id (``claude-...`` for Anthropic). We strip a single known
+       routing prefix and, for OpenRouter's three-segment ids, drop the
+       vendor segment too.
+    2. **Normalise version separators.** OpenRouter exposes Anthropic
+       models with dot-separated versions (``claude-haiku-4.5``); the
+       LiteLLM pricing table uses dashes (``claude-haiku-4-5``). They
+       refer to the same model. We rewrite Anthropic-shaped ids so the
+       lookup succeeds.
+    """
+
+    m = model.lower()
+    base = model
+    for prefix in ("openrouter/", "openai/", "azure/"):
+        if m.startswith(prefix):
+            stripped = model[len(prefix) :]
+            # OpenRouter wraps the model id as ``openrouter/<vendor>/<model>``;
+            # the underlying pricing key is just ``<model>`` for Anthropic
+            # ids and ``<vendor>/<model>`` is fine for others. Try the
+            # bare model first (Anthropic convention).
+            base = stripped.split("/", 1)[1] if "/" in stripped else stripped
+            break
+
+    # Anthropic ids in the LiteLLM pricing table use dashes between
+    # version segments; OpenRouter exposes them with dots. Rewrite.
+    if base.lower().startswith("claude") or base.lower().startswith("anthropic/"):
+        base = base.replace(".", "-")
+    return base
+
+
+def _resolve_cost(model: str, usage: TokenUsage) -> float:
+    """Compute USD cost from token counts using LiteLLM's pricing table.
+
+    LiteLLM doesn't populate the streaming chunk's ``cost`` field, so
+    ``_extract_usage`` returns 0. We finalise it here once the stream
+    finishes and we know which model was used.
+
+    Returns 0.0 on any failure (unknown model, import failure, malformed
+    pricing entry) and emits a one-line stderr note so silent pricing
+    misses become visible. We don't raise — cost telemetry is best-effort.
+    """
+
+    if usage.total_tokens <= 0:
+        return 0.0
+    try:
+        from litellm import cost_per_token
+
+        prompt_cost, completion_cost = cost_per_token(
+            model=_pricing_lookup_id(model),
+            prompt_tokens=max(usage.prompt_tokens - usage.cached_tokens, 0),
+            completion_tokens=usage.completion_tokens,
+        )
+        cost = float(prompt_cost) + float(completion_cost)
+    except Exception as exc:
+        sys.stderr.write(f"[llm] cost lookup failed for {model!r}: {type(exc).__name__}: {exc}\n")
+        return 0.0
+    if cost <= 0.0 and usage.total_tokens > 0:
+        sys.stderr.write(
+            f"[llm] no pricing entry for {model!r}; recorded cost as 0.0 "
+            f"despite {usage.total_tokens} tokens. "
+            f"If this is wrong, file an issue or pin a different LiteLLM version.\n"
+        )
+    return cost
 
 
 def count_tokens(model: str, messages: list[Message] | list[dict[str, Any]]) -> int:
