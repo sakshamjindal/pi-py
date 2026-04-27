@@ -68,3 +68,47 @@ def test_tool_execution_overridable_via_cli():
     assert s.tool_execution == "parallel"
     s2 = Settings.model_validate({"tool_execution": "sequential"})
     assert s2.tool_execution == "sequential"
+
+
+def test_dedup_and_breaker_defaults():
+    """Coding-harness ships dedup on by default with a 20-turn window
+    and a 3-failure / 5-turn-cooldown circuit breaker for web tools."""
+
+    s = Settings()
+    assert s.tool_dedup_enabled is True
+    assert s.tool_dedup_window == 20
+    assert s.web_fetch_failure_threshold == 3
+    assert s.web_fetch_cooldown_turns == 5
+
+
+def test_dedup_can_be_disabled_via_settings(tmp_path):
+    project = tmp_path / "p"
+    workspace = project / "src"
+    workspace.mkdir(parents=True)
+    (project / ".pyharness").mkdir()
+    (project / ".pyharness" / "settings.json").write_text(
+        json.dumps({"tool_dedup_enabled": False, "tool_dedup_window": 5}),
+        encoding="utf-8",
+    )
+    s = Settings.load(workspace=workspace, home=tmp_path / "home")
+    assert s.tool_dedup_enabled is False
+    assert s.tool_dedup_window == 5
+
+
+def test_breaker_thresholds_overridable(tmp_path):
+    project = tmp_path / "p"
+    workspace = project / "src"
+    workspace.mkdir(parents=True)
+    (project / ".pyharness").mkdir()
+    (project / ".pyharness" / "settings.json").write_text(
+        json.dumps(
+            {
+                "web_fetch_failure_threshold": 5,
+                "web_fetch_cooldown_turns": 10,
+            }
+        ),
+        encoding="utf-8",
+    )
+    s = Settings.load(workspace=workspace, home=tmp_path / "home")
+    assert s.web_fetch_failure_threshold == 5
+    assert s.web_fetch_cooldown_turns == 10
