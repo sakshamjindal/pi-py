@@ -23,7 +23,6 @@ from typing import Any, Literal
 from .agent_loop import LoopConfig, LoopResult, agent_loop, agent_loop_continue
 from .compaction import Compactor
 from .events import (
-    AgentEvent,
     LifecycleEvent,
     SessionEndEvent,
     SessionStartEvent,

@@ -33,12 +33,11 @@ from .events import (
     AssistantMessageEvent,
     CompactionEvent,
     FollowUpMessageEvent,
-    LifecycleEvent,
     SteeringMessageEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
 )
-from .extensions import HandlerContext, HookOutcome, HookResult
+from .extensions import HookOutcome, HookResult
 from .llm import LLMClient
 from .tools.base import Tool, ToolContext, ToolExecutionResult, ToolRegistry, execute_tool
 from .types import Message, ToolCall
