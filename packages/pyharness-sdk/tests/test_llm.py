@@ -7,8 +7,21 @@ from typing import Any
 
 import pytest
 
-from pyharness.llm import LLMClient
+from pyharness.llm import LLMClient, LLMError
 from pyharness.types import Message
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_keys(monkeypatch):
+    """Most tests stub ``litellm.acompletion`` so they never actually
+    need a real key — but the LLM client now fails fast when the env
+    var for the chosen model is missing. Set placeholder keys so those
+    tests skip the guard. Tests that *want* to exercise the guard use
+    ``monkeypatch.delenv`` explicitly."""
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
 
 
 class _FakeChunk:
@@ -219,3 +232,48 @@ async def test_streaming_emits_thinking_delta_events(monkeypatch):
     assert types.count("thinking_delta") == 3
     # The final-text chunk also produced a text_delta.
     assert types.count("text_delta") == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_provider_api_key_fails_fast(monkeypatch):
+    """When the env var LiteLLM expects for a model is unset, the client
+    must raise an ``LLMError`` *before* the network call so the user gets
+    an actionable message instead of an opaque provider 401."""
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    client = LLMClient()
+    with pytest.raises(LLMError, match="OPENROUTER_API_KEY is not set"):
+        await client.complete(
+            model="openrouter/anthropic/claude-haiku-4-5",
+            messages=[Message(role="user", content="hi")],
+        )
+
+
+@pytest.mark.asyncio
+async def test_missing_anthropic_key_fails_fast_for_bare_claude(monkeypatch):
+    """A bare ``claude-...`` model id (no provider prefix) routes to
+    Anthropic, so it should require ANTHROPIC_API_KEY."""
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client = LLMClient()
+    with pytest.raises(LLMError, match="ANTHROPIC_API_KEY is not set"):
+        await client.complete(
+            model="claude-opus-4-7",
+            messages=[Message(role="user", content="hi")],
+        )
+
+
+@pytest.mark.asyncio
+async def test_unknown_provider_does_not_block(monkeypatch):
+    """Models without a recognised prefix must not be blocked by the
+    fast-fail guard — LiteLLM might still know how to route them."""
+
+    # No env vars set; this would normally fail at the litellm call, but
+    # we stub acompletion to confirm the guard didn't raise first.
+    monkeypatch.setattr("litellm.acompletion", _fake_acompletion_text, raising=False)
+    client = LLMClient()
+    response = await client.complete(
+        model="some-custom-model",
+        messages=[Message(role="user", content="hi")],
+    )
+    assert response.text  # made it past the guard
