@@ -4,19 +4,19 @@
 >
 > (yet another harness!) pi-py is your own minimal claude code and python agent harness implementation inspired from Pi-mono and programmable alternative to Claude Code
 
-**A headless Python agent harness.**
-Supports Claude, Anthropic, and OpenAI. pi-py is an **embeddable
-agent SDK** with pluggable skills and agents using the Anthropic-
-ecosystem `SKILL.md` and `AGENTS.md` frontmatter formats, plus
-pluggable extensions (inspired by pi-mono) wired up through Python
-entry points. Following Anthropic's view that the **coding agent is
-the general-purpose agent**, domain-specific agents (finance,
-autoresearch, ops, support) are built *on top of* the bundled coding
-harness rather than as separate runtimes.
+pi-py is a headless Python agent harness and embeddable agent SDK
+with pluggable skills and agents using the Anthropic-ecosystem
+`SKILL.md` and `AGENTS.md` frontmatter formats, plus pluggable
+extensions (inspired by pi-mono) wired up through Python entry
+points. Supports Anthropic, OpenAI, and other LLM providers.
 
-The intent is that **domain-specific harnesses are built on top of
-pi-py** rather than reinventing the loop, the session log, and the
-extension surface every time.
+Following Anthropic's view that the **coding agent is the
+general-purpose agent**, domain-specific agents (finance,
+autoresearch, ops, support) are built *on top of* the bundled coding
+harness rather than as separate runtimes. The intent is that
+**domain-specific harnesses are built on top of pi-py** rather than
+reinventing the loop, the session log, and the extension surface
+every time.
 
 > Inspired by [pi-mono](https://github.com/badlogic/pi-mono):
 > minimal core, files-as-truth, observability over magic. File
