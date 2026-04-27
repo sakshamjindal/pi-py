@@ -30,7 +30,7 @@ for pkg in ("pyharness-sdk", "coding-harness"):
     if src.is_dir() and str(src) not in sys.path:
         sys.path.insert(0, str(src))
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # noqa: E402
 
 from pyharness import (  # noqa: E402
     Agent,
@@ -272,11 +272,9 @@ async def main() -> int:
     )
     print(
         f"  parallel/sequential elapsed: {parallel_stats['elapsed']:.2f}s / "
-        f"{sequential_stats['elapsed']:.2f}s  (speedup: {speedup:.2f}×)"
+        f"{sequential_stats['elapsed']:.2f}s  (speedup: {speedup:.2f}x)"
     )
-    print(
-        f"  terminate: turns={terminate_stats['turns']} reason={terminate_stats['reason']}"
-    )
+    print(f"  terminate: turns={terminate_stats['turns']} reason={terminate_stats['reason']}")
     print(
         f"  continue : first={continue_stats['first_reason']} "
         f"second={continue_stats['second_reason']}"

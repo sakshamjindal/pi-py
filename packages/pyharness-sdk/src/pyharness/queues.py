@@ -65,9 +65,7 @@ class AgentHandle:
         """
 
         if self.continue_fn is None:
-            raise RuntimeError(
-                "continue_run is unavailable on this handle (build via Agent.start)"
-            )
+            raise RuntimeError("continue_run is unavailable on this handle (build via Agent.start)")
         if not self.task.done():
             raise RuntimeError("Cannot continue while the previous run is still in flight")
         # Reset abort so a fresh run can proceed.

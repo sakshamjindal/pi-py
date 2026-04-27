@@ -163,9 +163,7 @@ async def agent_loop_continue(
 
     # Find the last non-system message; system can be in any position
     # but conventionally is at index 0.
-    last_non_system = next(
-        (m for m in reversed(messages) if m.role != "system"), None
-    )
+    last_non_system = next((m for m in reversed(messages) if m.role != "system"), None)
     if last_non_system is None:
         raise ValueError("agent_loop_continue: no non-system messages to continue from")
     if last_non_system.role == "assistant":
@@ -392,9 +390,7 @@ async def _dispatch_tool_batch(
         if tool is None:
             err = f"Unknown tool: {tc.name}"
             ter = ToolExecutionResult(ok=False, content=err, error="unknown_tool")
-            await _record_tool_end(
-                tc.id, tc.name, ter, session_appender, config.session_id
-            )
+            await _record_tool_end(tc.id, tc.name, ter, session_appender, config.session_id)
             msg = Message(role="tool", tool_call_id=tc.id, name=tc.name, content=err)
             immediate[tc.id] = (msg, ter)
             continue
@@ -477,9 +473,7 @@ async def _dispatch_tool_batch(
         return tc.id, ter
 
     if use_parallel:
-        results = await asyncio.gather(
-            *[_run_one(p) for p in runnable], return_exceptions=False
-        )
+        results = await asyncio.gather(*[_run_one(p) for p in runnable], return_exceptions=False)
         for call_id, ter in results:
             executed[call_id] = ter
     else:
@@ -549,16 +543,12 @@ async def _drain_into_messages(
 ) -> None:
     if steering_drainer is not None:
         for content in await steering_drainer():
-            await session_appender(
-                SteeringMessageEvent(session_id=session_id, content=content)
-            )
+            await session_appender(SteeringMessageEvent(session_id=session_id, content=content))
             await emit_lifecycle("steering_received", {"content": content})
             messages.append(Message(role="user", content=f"[steering] {content}"))
     if followup_drainer is not None:
         for content in await followup_drainer():
-            await session_appender(
-                FollowUpMessageEvent(session_id=session_id, content=content)
-            )
+            await session_appender(FollowUpMessageEvent(session_id=session_id, content=content))
             await emit_lifecycle("followup_received", {"content": content})
             messages.append(Message(role="user", content=content))
 
@@ -620,5 +610,3 @@ async def _record_tool_end(
             duration_ms=ter.duration_ms,
         )
     )
-
-

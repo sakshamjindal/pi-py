@@ -283,7 +283,7 @@ async def test_parallel_tool_dispatch_runs_concurrently(tmp_path, isolated_sessi
     result = await agent.run("go")
     elapsed = asyncio.get_event_loop().time() - started
     assert result.completed
-    # 3 × 100ms serial would be >0.28s; parallel should be <0.20s with
+    # 3 x 100ms serial would be >0.28s; parallel should be <0.20s with
     # generous slack for fsync + event-bus overhead.
     assert elapsed < 0.20, f"expected parallel timing, got {elapsed:.3f}s"
 
@@ -417,9 +417,7 @@ async def test_continue_run_after_llm_error(tmp_path, isolated_session_dir):
 
 
 @pytest.mark.asyncio
-async def test_continue_run_rejects_when_last_message_is_assistant(
-    tmp_path, isolated_session_dir
-):
+async def test_continue_run_rejects_when_last_message_is_assistant(tmp_path, isolated_session_dir):
     """If the transcript ends in an assistant message, continue must refuse
     rather than send a malformed request."""
 
