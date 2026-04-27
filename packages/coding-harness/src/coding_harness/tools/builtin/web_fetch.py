@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import httpx
 from pydantic import BaseModel, Field
 
-from pyharness import Tool, ToolContext
+from pyharness import Tool, ToolContext, ToolError
 
 
 class WebFetchArgs(BaseModel):
@@ -43,7 +43,7 @@ class WebFetchTool(Tool):
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                 resp = await client.get(args.url, headers={"User-Agent": "pyharness/0.1"})
         except httpx.HTTPError as exc:
-            return f"web_fetch error: {exc}"
+            raise ToolError(f"web_fetch error: {exc}") from exc
 
         ctype = resp.headers.get("content-type", "")
         body = resp.text
@@ -57,6 +57,14 @@ class WebFetchTool(Tool):
             f"fetched_at: {datetime.now(UTC).isoformat()}\n"
             f"--- body ---\n"
         )
+        # 4xx/5xx are failures from the agent's perspective: the URL didn't
+        # resolve to the resource being asked for. Raising as ToolError
+        # surfaces ok=False to the harness, which lets the circuit breaker
+        # see consecutive bad-URL guesses as the failure pattern they are.
+        # (HTTP-200 pages with a 404 *body*, e.g. soft-404s, still slip
+        # through — that's a model-judgment problem we don't fix here.)
+        if resp.status_code >= 400:
+            raise ToolError(meta + body)
         return meta + body
 
 

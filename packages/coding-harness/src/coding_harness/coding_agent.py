@@ -408,6 +408,10 @@ class CodingAgent:
             },
             max_tokens=self.settings.model_dump().get("max_tokens"),
             tool_execution=self.settings.tool_execution,
+            tool_dedup_enabled=self.settings.tool_dedup_enabled,
+            tool_dedup_window=self.settings.tool_dedup_window,
+            web_fetch_failure_threshold=self.settings.web_fetch_failure_threshold,
+            web_fetch_cooldown_turns=self.settings.web_fetch_cooldown_turns,
             agent_name=self.agent_def.name if self.agent_def else None,
             settings_snapshot=self.settings.model_dump(),
         )

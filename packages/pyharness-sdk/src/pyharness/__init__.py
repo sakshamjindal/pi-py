@@ -9,6 +9,7 @@ in the ``harness`` package.
 from __future__ import annotations
 
 from .agent_loop import LoopConfig, LoopResult, agent_loop, agent_loop_continue
+from .circuit_breaker import CircuitOpen, WebFetchCircuitBreaker
 from .compaction import CompactionResult, Compactor
 from .events import (
     AgentEvent,
@@ -37,6 +38,7 @@ from .llm import LLMClient, LLMError, count_tokens
 from .loop import Agent, AgentOptions
 from .queues import AgentHandle, MessageQueue
 from .session import Session, SessionInfo
+from .tool_dedup import DedupHit, ToolCallDedup
 from .tools.base import (
     Tool,
     ToolContext,
@@ -64,9 +66,11 @@ __all__ = [
     "AgentHandle",
     "AgentOptions",
     "AssistantMessageEvent",
+    "CircuitOpen",
     "CompactionEvent",
     "CompactionResult",
     "Compactor",
+    "DedupHit",
     "EventBus",
     "ExtensionAPI",
     "FileMutationQueue",
@@ -93,6 +97,7 @@ __all__ = [
     "TokenUsage",
     "Tool",
     "ToolCall",
+    "ToolCallDedup",
     "ToolCallEndEvent",
     "ToolCallStartEvent",
     "ToolContext",
@@ -101,6 +106,7 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "UserMessageEvent",
+    "WebFetchCircuitBreaker",
     "__version__",
     "agent_loop",
     "agent_loop_continue",
