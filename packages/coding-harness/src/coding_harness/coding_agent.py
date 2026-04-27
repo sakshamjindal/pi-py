@@ -407,6 +407,7 @@ class CodingAgent:
                 "web_search": float(self.settings.fetch_timeout_seconds + 5),
             },
             max_tokens=self.settings.model_dump().get("max_tokens"),
+            tool_execution=self.settings.tool_execution,
             agent_name=self.agent_def.name if self.agent_def else None,
             settings_snapshot=self.settings.model_dump(),
         )

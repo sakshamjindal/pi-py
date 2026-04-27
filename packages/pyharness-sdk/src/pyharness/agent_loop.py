@@ -38,6 +38,7 @@ from .events import (
     ToolCallStartEvent,
 )
 from .extensions import HookOutcome, HookResult
+from .file_mutation_queue import FileMutationQueue
 from .llm import LLMClient
 from .tools.base import Tool, ToolContext, ToolExecutionResult, ToolRegistry, execute_tool
 from .types import Message, ToolCall
@@ -76,6 +77,11 @@ class LoopConfig:
     run_id: str
     workspace: Path
     settings_snapshot: dict[str, Any]
+    # Per-path lock used by mutating tools (edit, write, …) to serialise
+    # concurrent mutations to the same file. Different paths still
+    # parallelise. ``None`` = no lock; tools that need one fall back to
+    # running sequentially within a coarse ``execution_mode``.
+    file_mutation_queue: FileMutationQueue | None = None
 
 
 @dataclass
@@ -444,12 +450,15 @@ async def _dispatch_tool_batch(
                 arguments=tc.arguments,
             )
         )
+        extras: dict[str, Any] = {"files_written": files_written}
+        if config.file_mutation_queue is not None:
+            extras["file_mutation_queue"] = config.file_mutation_queue
         ctx = ToolContext(
             workspace=config.workspace,
             session_id=config.session_id,
             run_id=config.run_id,
             settings=config.settings_snapshot,
-            extras={"files_written": files_written},
+            extras=extras,
         )
         ter = await execute_tool(
             prep.tool,

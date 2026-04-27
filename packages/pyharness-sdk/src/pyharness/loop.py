@@ -29,6 +29,7 @@ from .events import (
     UserMessageEvent,
 )
 from .extensions import EventBus, HandlerContext, HookOutcome
+from .file_mutation_queue import FileMutationQueue
 from .llm import LLMClient
 from .queues import AgentHandle, MessageQueue
 from .session import Session
@@ -103,6 +104,11 @@ class Agent:
         self._abort_event = asyncio.Event()
         self._cost_total = 0.0
         self._files_written: list[str] = []
+        # One mutation queue per Agent. Tools that touch files (edit,
+        # write, ...) acquire per-path locks via ``ctx.extras``, so two
+        # mutations to the SAME file serialise even when the dispatcher
+        # is running tools in parallel. Different paths still parallelise.
+        self._file_mutation_queue = FileMutationQueue()
         # Persistent transcript across run/continue calls within one Agent.
         self._messages: list[Message] = []
         self._messages_initialised = False
@@ -216,6 +222,7 @@ class Agent:
             run_id=self.run_id,
             workspace=self.workspace,
             settings_snapshot=self.options.settings_snapshot,
+            file_mutation_queue=self._file_mutation_queue,
         )
 
     async def _finalise(self, loop_result: LoopResult) -> RunResult:

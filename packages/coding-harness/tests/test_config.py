@@ -41,3 +41,30 @@ def test_merge_personal_and_project_and_cli(tmp_path):
         cli_overrides={"default_model": "cli-model"},
     )
     assert s2.default_model == "cli-model"
+
+
+def test_tool_execution_default_is_parallel():
+    """The coding-harness defaults parallel-by-default. Per-path locks
+    in edit/write make this safe; bash carries its own sequential tag."""
+
+    assert Settings().tool_execution == "parallel"
+
+
+def test_tool_execution_overridable_via_settings_file(tmp_path):
+    project = tmp_path / "p"
+    workspace = project / "src"
+    workspace.mkdir(parents=True)
+    (project / ".pyharness").mkdir()
+    (project / ".pyharness" / "settings.json").write_text(
+        json.dumps({"tool_execution": "sequential"}),
+        encoding="utf-8",
+    )
+    s = Settings.load(workspace=workspace, home=tmp_path / "home")
+    assert s.tool_execution == "sequential"
+
+
+def test_tool_execution_overridable_via_cli():
+    s = Settings.model_validate({"tool_execution": "parallel"})
+    assert s.tool_execution == "parallel"
+    s2 = Settings.model_validate({"tool_execution": "sequential"})
+    assert s2.tool_execution == "sequential"

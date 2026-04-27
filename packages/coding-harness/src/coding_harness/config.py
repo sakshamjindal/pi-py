@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +32,12 @@ class Settings(BaseModel):
     fetch_allowlist: list[str] = Field(default_factory=list)
     fetch_blocklist: list[str] = Field(default_factory=list)
     model_context_window: int = 200_000
+    # Default to "parallel" for the coding harness: built-in tools that
+    # mutate shared state (edit, write) are protected by a per-path
+    # FileMutationQueue, and bash carries its own ``execution_mode =
+    # "sequential"`` opt-out. Override to "sequential" to revert to the
+    # safer-but-slower mode.
+    tool_execution: Literal["parallel", "sequential"] = "parallel"
 
     @classmethod
     def load(

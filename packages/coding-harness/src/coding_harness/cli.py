@@ -52,6 +52,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--max-turns", type=int, default=None)
     p.add_argument(
+        "--tool-execution",
+        choices=("parallel", "sequential"),
+        default=None,
+        help=(
+            "Override tool dispatch mode. parallel = run independent tool "
+            "calls concurrently (per-path lock keeps same-file mutations "
+            "safe). sequential = one tool at a time. Default: per-project "
+            "settings.json (parallel)."
+        ),
+    )
+    p.add_argument(
         "--no-stream", action="store_true", help="Collect output before printing (off by default)."
     )
     p.add_argument("--quiet", action="store_true", help="Suppress non-final output.")
@@ -100,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         cli_overrides["default_model"] = args.model
     if args.max_turns:
         cli_overrides["max_turns"] = args.max_turns
+    if args.tool_execution:
+        cli_overrides["tool_execution"] = args.tool_execution
 
     settings = Settings.load(workspace=workspace, cli_overrides=cli_overrides)
 

@@ -438,3 +438,135 @@ async def test_continue_run_rejects_when_last_message_is_assistant(tmp_path, iso
 
     with pytest.raises(ValueError, match="cannot continue from an assistant message"):
         await agent.continue_run()
+
+
+# ---------------------------------------------------------------------------
+# (4) Per-path mutation queue: writes parallelise across files,
+# serialise within a single file.
+# ---------------------------------------------------------------------------
+
+
+class _SlowWriteArgs(BaseModel):
+    path: str
+    content: str
+    delay_ms: int = 50
+
+
+class _SlowWriteTool(Tool):
+    """Like the production write tool but with an artificial sleep so the
+    parallelism is timable. Uses ctx.extras['file_mutation_queue'] when
+    present so we test the same code path."""
+
+    name = "slow_write"
+    description = "Write a file with an artificial delay."
+    args_schema = _SlowWriteArgs
+
+    async def execute(self, args, ctx):  # type: ignore[override]
+        import contextlib
+
+        target = ctx.workspace / args.path
+        queue = ctx.extras.get("file_mutation_queue")
+        guard = queue.acquire(target) if queue is not None else contextlib.nullcontext()
+        async with guard:
+            await asyncio.sleep(args.delay_ms / 1000)
+            target.write_text(args.content, encoding="utf-8")
+            return f"wrote:{args.path}"
+
+
+@pytest.mark.asyncio
+async def test_parallel_writes_to_different_files_run_concurrently(tmp_path, isolated_session_dir):
+    """Two writes to *different* files must overlap when tool_execution
+    is parallel — wall time roughly = single write, not 2x."""
+
+    registry = ToolRegistry()
+    registry.register(_SlowWriteTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="slow_write",
+                        arguments={"path": "a.txt", "content": "A", "delay_ms": 100},
+                    ),
+                    ToolCall(
+                        id="c2",
+                        name="slow_write",
+                        arguments={"path": "b.txt", "content": "B", "delay_ms": 100},
+                    ),
+                ],
+            ),
+            LLMResponse(text="done"),
+        ]
+    )
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=5, tool_execution="parallel"),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=EventBus(),
+        workspace=tmp_path,
+        llm=llm,
+    )
+    started = asyncio.get_event_loop().time()
+    result = await agent.run("go")
+    elapsed = asyncio.get_event_loop().time() - started
+    assert result.completed
+    # Sequential would be ~0.2s+; parallel should be ~0.1s with slack.
+    assert elapsed < 0.18, f"writes to different files did not parallelise (took {elapsed:.3f}s)"
+    assert (tmp_path / "a.txt").read_text() == "A"
+    assert (tmp_path / "b.txt").read_text() == "B"
+
+
+@pytest.mark.asyncio
+async def test_parallel_writes_to_same_file_serialise(tmp_path, isolated_session_dir):
+    """Two writes to the *same* file must serialise even in parallel mode.
+    The per-path lock guarantees the second write observes the first's
+    completion (and the file ends with the second write's content)."""
+
+    registry = ToolRegistry()
+    registry.register(_SlowWriteTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                text="",
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="slow_write",
+                        arguments={"path": "shared.txt", "content": "FIRST", "delay_ms": 80},
+                    ),
+                    ToolCall(
+                        id="c2",
+                        name="slow_write",
+                        arguments={"path": "shared.txt", "content": "SECOND", "delay_ms": 80},
+                    ),
+                ],
+            ),
+            LLMResponse(text="done"),
+        ]
+    )
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=5, tool_execution="parallel"),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=EventBus(),
+        workspace=tmp_path,
+        llm=llm,
+    )
+    started = asyncio.get_event_loop().time()
+    result = await agent.run("go")
+    elapsed = asyncio.get_event_loop().time() - started
+    assert result.completed
+    # Same-file serialisation: the two 80ms writes must NOT overlap.
+    # Floor is ~0.16s; allow generous slack for fsync etc.
+    assert elapsed >= 0.14, (
+        f"writes to same file unexpectedly overlapped (took {elapsed:.3f}s — "
+        f"per-path lock is broken)"
+    )
+    # Source order is preserved; second write wins.
+    assert (tmp_path / "shared.txt").read_text() == "SECOND"
