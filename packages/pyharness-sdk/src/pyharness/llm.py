@@ -189,6 +189,12 @@ class LLMClient:
             "messages": msg_dicts,
             "temperature": temperature if temperature is not None else self.default_temperature,
             "stream": True,
+            # OpenAI-compatible providers (OpenRouter, OpenAI itself, Azure,
+            # etc.) only emit usage on the final chunk when this is set.
+            # Without it, prompt_tokens / completion_tokens / total_tokens
+            # all come back as 0, which silently breaks compaction's
+            # threshold trigger and cost reporting.
+            "stream_options": {"include_usage": True},
         }
         if send_tools:
             kwargs["tools"] = send_tools
