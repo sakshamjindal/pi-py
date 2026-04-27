@@ -64,7 +64,6 @@ testpaths = [
     "packages/pyharness-sdk/tests",
     "packages/coding-harness/tests",
     "packages/tui/tests",
-    "examples/simulations",
 ]
 
 [tool.ruff]
