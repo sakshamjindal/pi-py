@@ -13,6 +13,7 @@ path identical between streaming and non-streaming callers.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -27,6 +28,43 @@ class LLMError(Exception):
 def _is_anthropic_model(model: str) -> bool:
     m = model.lower()
     return m.startswith(("claude", "anthropic/"))
+
+
+# Provider prefix → env var LiteLLM expects. Only listed providers are
+# checked; anything else (custom endpoints, local models, future providers)
+# is left to LiteLLM to validate at call time.
+_PROVIDER_API_KEY_VARS: dict[str, str] = {
+    "openrouter/": "OPENROUTER_API_KEY",
+    "anthropic/": "ANTHROPIC_API_KEY",
+    "openai/": "OPENAI_API_KEY",
+    "gemini/": "GEMINI_API_KEY",
+    "groq/": "GROQ_API_KEY",
+    "mistral/": "MISTRAL_API_KEY",
+    "deepseek/": "DEEPSEEK_API_KEY",
+}
+
+
+def _check_api_key_for_model(model: str) -> None:
+    """Fail fast with an actionable message when the env var LiteLLM needs
+    is missing. Without this we get an opaque 401 from the provider with
+    no hint about which env var is wrong (or, worse, LiteLLM picks up the
+    *other* provider's key and authenticates against the wrong endpoint).
+    """
+
+    m = model.lower()
+    # Bare ``claude-...`` IDs route to Anthropic when no provider prefix is set.
+    if m.startswith("claude") and "/" not in m:
+        env_var = "ANTHROPIC_API_KEY"
+    else:
+        env_var = next(
+            (v for prefix, v in _PROVIDER_API_KEY_VARS.items() if m.startswith(prefix)),
+            "",
+        )
+    if env_var and not os.environ.get(env_var):
+        raise LLMError(
+            f"{env_var} is not set. Model {model!r} requires it. "
+            f"Export it in your shell (e.g. `export {env_var}=...`) and retry."
+        )
 
 
 def _messages_to_dicts(messages: list[Message] | list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -209,6 +247,8 @@ class LLMClient:
             from litellm import acompletion
         except Exception as exc:  # pragma: no cover - import-time only
             raise LLMError("litellm is not available") from exc
+
+        _check_api_key_for_model(model)
 
         try:
             stream = await acompletion(**kwargs)
