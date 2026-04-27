@@ -32,6 +32,7 @@ from .extensions import (
     HookOutcome,
     HookResult,
 )
+from .file_mutation_queue import FileMutationQueue
 from .llm import LLMClient, LLMError, count_tokens
 from .loop import Agent, AgentOptions
 from .queues import AgentHandle, MessageQueue
@@ -68,6 +69,7 @@ __all__ = [
     "Compactor",
     "EventBus",
     "ExtensionAPI",
+    "FileMutationQueue",
     "FollowUpMessageEvent",
     "HandlerContext",
     "HookOutcome",
