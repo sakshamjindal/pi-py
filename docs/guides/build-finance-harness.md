@@ -702,8 +702,8 @@ The only pyharness-level customization you need:
 3. **Extensions.** Audit logging, circuit breaker, cost tracking. Pyharness's
    extension API supports this.
 
-Pyharness stays at ~1500 lines forever. The finance harness is everything
-you build around it.
+Pyharness is the engine. The finance harness is everything you build
+around it.
 
 ---
 
