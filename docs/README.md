@@ -25,10 +25,8 @@ substitutes for the coding-harness README.
 
 | Guide | What | Prerequisite |
 |---|---|---|
-| [Plugins](guides/plugins.md) | Publishing skills & extensions from a pip-installed library via Python entry points | [coding-harness Skills + Extensions + Plugins sections](../packages/coding-harness/README.md#skills) |
-| [Orchestration](guides/orchestration.md) | Sequential pipelines, fan-out, supervisor / specialist via subprocess | [coding-harness Programmatic Use](../packages/coding-harness/README.md#programmatic-use-sdk) |
-| [Building a finance harness](guides/build-finance-harness.md) | End-to-end domain-harness recipe applied to trading / portfolio analysis | All of the above |
-| [Building an autoresearch harness](guides/build-autoresearch-harness.md) | Same recipe applied to long-horizon research | All of the above |
+| [Building a finance harness](guides/build-finance-harness.md) | End-to-end domain-harness recipe applied to trading / portfolio analysis | coding-harness README |
+| [Building an autoresearch harness](guides/build-autoresearch-harness.md) | Same recipe applied to long-horizon research | coding-harness README |
 
 The build-* guides are the largest worked examples — full project
 directories with 30+ tools, named agents, eval suites. They are *not*

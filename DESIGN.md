@@ -413,7 +413,7 @@ hooks alongside its tools — hooks register only when the skill
 activates, so they don't leak into agents that never load it.
 
 Place in `~/.pyharness/skills/`, `<project>/.pyharness/skills/`, or
-ship via a [plugin](#plugins). See [docs/guides/plugins.md](docs/guides/plugins.md).
+ship via a [plugin](#plugins).
 
 ### Extensions
 
@@ -519,8 +519,6 @@ agent = CodingAgent(CodingAgentConfig(
 ))
 ```
 
-Full guide: [docs/guides/plugins.md](docs/guides/plugins.md).
-
 ## Programmatic Use (SDK)
 
 `CodingAgent` is the public SDK class. The CLI is a thin wrapper
@@ -615,8 +613,6 @@ recipes:
 - `pipeline.py` — sequential, agent A → artefact → agent B
 - `fanout.py` — parallel agents with reduce
 - `supervisor.py` — supervisor delegating to specialists via subprocess
-
-Full guide: [docs/guides/orchestration.md](docs/guides/orchestration.md).
 
 ## Sessions
 
@@ -718,7 +714,5 @@ pyharness --fork 7d3a... --at-event 14 "what if we used numpy instead?"
 - [`packages/coding-harness/`](packages/coding-harness/) — same content as Part 2; the canonical source
 - [`packages/pyharness-sdk/`](packages/pyharness-sdk/) — kernel internals (loop, events, contracts)
 - [`packages/tui/`](packages/tui/) — minimal interactive shell
-- [docs/guides/plugins.md](docs/guides/plugins.md) — publishing skills + extensions via Python entry points
-- [docs/guides/orchestration.md](docs/guides/orchestration.md) — multi-agent patterns
 - [docs/guides/build-finance-harness.md](docs/guides/build-finance-harness.md) — end-to-end domain harness recipe
 - [docs/guides/build-autoresearch-harness.md](docs/guides/build-autoresearch-harness.md) — same recipe for research workflows

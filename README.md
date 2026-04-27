@@ -184,5 +184,3 @@ refusals list.
 | [`packages/tui/README.md`](packages/tui/README.md) | Interactive shell |
 | [`docs/guides/build-finance-harness.md`](docs/guides/build-finance-harness.md) | End-to-end walkthrough: 30-50 tools, 5 agents, morning routine |
 | [`docs/guides/build-autoresearch-harness.md`](docs/guides/build-autoresearch-harness.md) | Same recipe for research workflows |
-| [`docs/guides/plugins.md`](docs/guides/plugins.md) | Publishing skills and extensions from a pip-installed library |
-| [`docs/guides/orchestration.md`](docs/guides/orchestration.md) | Pipeline, fan-out, supervisor patterns. Recipes, not a framework. |

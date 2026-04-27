@@ -295,7 +295,7 @@ hooks alongside its tools — hooks register only when the skill
 activates, so they don't leak into agents that never load it.
 
 Place in `~/.pyharness/skills/`, `<project>/.pyharness/skills/`, or
-ship via a [plugin](#plugins). See [docs/guides/plugins.md](../../docs/guides/plugins.md).
+ship via a [plugin](#plugins).
 
 ### Extensions
 
@@ -401,8 +401,6 @@ agent = CodingAgent(CodingAgentConfig(
 ))
 ```
 
-Full guide: [docs/guides/plugins.md](../../docs/guides/plugins.md).
-
 ---
 
 ## Programmatic Use (SDK)
@@ -501,8 +499,6 @@ runnable recipes:
 - `pipeline.py` — sequential, agent A → artefact → agent B
 - `fanout.py` — parallel agents with reduce
 - `supervisor.py` — supervisor delegating to specialists via subprocess
-
-Full guide: [docs/guides/orchestration.md](../../docs/guides/orchestration.md).
 
 ---
 
@@ -647,5 +643,3 @@ pyharness --fork 7d3a... --at-event 14 "what if we used numpy instead?"
 - [`DESIGN.md`](../../DESIGN.md) — principles and refusals
 - [docs/guides/build-finance-harness.md](../../docs/guides/build-finance-harness.md)
 - [docs/guides/build-autoresearch-harness.md](../../docs/guides/build-autoresearch-harness.md)
-- [docs/guides/plugins.md](../../docs/guides/plugins.md)
-- [docs/guides/orchestration.md](../../docs/guides/orchestration.md)
