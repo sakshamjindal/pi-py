@@ -205,6 +205,7 @@ is the durable record even if the process crashes.
 | `after_tool_call` | `{tool_name, ok, result, duration_ms, terminate}` |
 | `compaction_start`, `compaction_end` | `{}` / `{compacted, tokens_before, tokens_after}` |
 | `steering_received`, `followup_received` | `{content}` |
+| `message_start`, `message_end` | `{message: <Message dump>}` — fires around every transcript append (initial prompt, assistant message, tool result, steering / follow-up). Useful for streaming UIs and per-message extensions; the lifecycle stream parallels the durable session-log events. |
 
 Subscribe via `EventBus.subscribe(name, handler)`. Handlers run in
 registration order. The first non-`Continue` outcome wins. Handler

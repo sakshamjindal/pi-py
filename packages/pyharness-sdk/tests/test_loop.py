@@ -570,3 +570,172 @@ async def test_parallel_writes_to_same_file_serialise(tmp_path, isolated_session
     )
     # Source order is preserved; second write wins.
     assert (tmp_path / "shared.txt").read_text() == "SECOND"
+
+
+# ---------------------------------------------------------------------------
+# (5) message_start / message_end lifecycle events
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_message_lifecycle_events_fire_in_order(tmp_path, isolated_session_dir):
+    """Every transcript-mutating step (initial prompt, assistant message,
+    tool result) emits ``message_start`` before the append and
+    ``message_end`` after, in the same order the messages enter the
+    transcript.
+
+    This is the contract a streaming UI or per-message extension would
+    rely on. It is parallel to the existing session-log events
+    (``UserMessageEvent``, ``AssistantMessageEvent``, ``ToolCallEndEvent``);
+    the lifecycle stream is for live observation, the session log for
+    durable replay.
+    """
+
+    from pyharness import HookOutcome
+
+    bus = EventBus()
+    seen: list[tuple[str, str]] = []  # (event_name, role)
+
+    async def on_msg(event, ctx):
+        msg = event.payload.get("message", {})
+        seen.append((event.name, msg.get("role", "?")))
+        return HookOutcome.cont()
+
+    bus.subscribe("message_start", on_msg)
+    bus.subscribe("message_end", on_msg)
+
+    (tmp_path / "f.txt").write_text("hello\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(_ReadTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=10),
+        system_prompt="You are a test agent.",
+        tool_registry=registry,
+        session=session,
+        event_bus=bus,
+        workspace=tmp_path,
+        llm=_ScriptedLLM(
+            [
+                LLMResponse(
+                    text="",
+                    tool_calls=[ToolCall(id="c1", name="read", arguments={"path": "f.txt"})],
+                ),
+                LLMResponse(text="done"),
+            ]
+        ),
+    )
+    result = await agent.run("read it")
+    assert result.completed
+
+    # Expected sequence: user → assistant(with tool_calls) → tool → assistant(final).
+    # Each role appears as a (start, end) pair, in transcript order.
+    pairs = [(seen[i], seen[i + 1]) for i in range(0, len(seen), 2)]
+    assert all(s[0] == "message_start" and e[0] == "message_end" for s, e in pairs), (
+        f"start/end events misordered: {seen}"
+    )
+    assert all(s[1] == e[1] for s, e in pairs), f"start/end role mismatch within a pair: {pairs}"
+
+    roles_in_order = [s[1] for s, _ in pairs]
+    assert roles_in_order == ["user", "assistant", "tool", "assistant"], (
+        f"unexpected role sequence: {roles_in_order}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_message_events_payload_contains_message_dump(tmp_path, isolated_session_dir):
+    """Subscribers receive the full Message payload (role + content +
+    tool_calls when applicable) under ``payload["message"]``."""
+
+    from pyharness import HookOutcome
+
+    bus = EventBus()
+    captured_starts: list[dict] = []
+
+    async def on_start(event, ctx):
+        captured_starts.append(event.payload["message"])
+        return HookOutcome.cont()
+
+    bus.subscribe("message_start", on_start)
+
+    (tmp_path / "f.txt").write_text("x\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(_ReadTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=5),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=bus,
+        workspace=tmp_path,
+        llm=_ScriptedLLM(
+            [
+                LLMResponse(
+                    text="",
+                    tool_calls=[ToolCall(id="c1", name="read", arguments={"path": "f.txt"})],
+                ),
+                LLMResponse(text="ok"),
+            ]
+        ),
+    )
+    await agent.run("hi")
+
+    # 4 messages should have entered the transcript via the loop:
+    # user prompt, assistant w/ tool_calls, tool result, final assistant.
+    assert len(captured_starts) == 4
+
+    user_msg, assistant_with_tools, tool_msg, final_assistant = captured_starts
+    assert user_msg["role"] == "user"
+    assert user_msg["content"] == "hi"
+
+    assert assistant_with_tools["role"] == "assistant"
+    assert assistant_with_tools.get("tool_calls"), "assistant payload should carry tool_calls"
+
+    assert tool_msg["role"] == "tool"
+    assert tool_msg["tool_call_id"] == "c1"
+
+    assert final_assistant["role"] == "assistant"
+    assert final_assistant["content"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_message_events_fire_for_steering_injection(tmp_path, isolated_session_dir):
+    """A steered message injected at the top of a turn also emits
+    ``message_start`` / ``message_end`` — useful for a live UI to
+    render programmatic interjections the same way it renders typed
+    user messages."""
+
+    from pyharness import HookOutcome
+
+    bus = EventBus()
+    starts: list[str] = []  # captured message contents in start events
+
+    async def on_start(event, ctx):
+        msg = event.payload["message"]
+        if msg.get("role") == "user":
+            starts.append(msg.get("content", ""))
+        return HookOutcome.cont()
+
+    bus.subscribe("message_start", on_start)
+
+    registry = ToolRegistry()
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=2),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=bus,
+        workspace=tmp_path,
+        llm=_ScriptedLLM([LLMResponse(text="acknowledged")]),
+    )
+    await agent._steering.put("change of plan")
+    await agent.run("initial prompt")
+
+    # Both the initial user prompt and the steering message must produce
+    # message_start events.
+    assert "initial prompt" in starts
+    assert any("[steering]" in s for s in starts), (
+        f"expected steering message_start to fire; got {starts}"
+    )
