@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .agent_loop import LoopConfig, LoopResult, agent_loop, agent_loop_continue
+from .circuit_breaker import WebFetchCircuitBreaker
 from .compaction import Compactor
 from .events import (
     LifecycleEvent,
@@ -33,6 +34,7 @@ from .file_mutation_queue import FileMutationQueue
 from .llm import LLMClient
 from .queues import AgentHandle, MessageQueue
 from .session import Session
+from .tool_dedup import ToolCallDedup
 from .tools.base import ToolRegistry
 from .types import Message, RunResult
 
@@ -59,6 +61,17 @@ class AgentOptions:
     # force the whole batch to serialise. Default is sequential to match
     # historical behaviour; opt in per agent.
     tool_execution: Literal["parallel", "sequential"] = "sequential"
+    # Per-session dedup for read-only tool calls (read, web_fetch,
+    # web_search, grep, glob). Same args within ``tool_dedup_window``
+    # turns ⇒ synthetic "already called" result instead of executing.
+    # Mutating tools (bash/edit/write) bypass.
+    tool_dedup_enabled: bool = True
+    tool_dedup_window: int = 20
+    # Per-tool consecutive-failure breaker. Watches web_fetch and
+    # web_search; trips after ``threshold`` failures, refuses calls
+    # for ``cooldown_turns`` turns.
+    web_fetch_failure_threshold: int = 3
+    web_fetch_cooldown_turns: int = 5
     # Recorded in the session_start event for traceability. The SDK does
     # not interpret these.
     agent_name: str | None = None
@@ -109,6 +122,19 @@ class Agent:
         # mutations to the SAME file serialise even when the dispatcher
         # is running tools in parallel. Different paths still parallelise.
         self._file_mutation_queue = FileMutationQueue()
+        # Per-session deduper for read-only tool calls (read, web_fetch,
+        # web_search, grep, glob). Same args within ``window`` turns ⇒
+        # synthetic "already called" result instead of executing. Mutating
+        # tools (bash/edit/write) bypass.
+        self._tool_dedup: ToolCallDedup | None = (
+            ToolCallDedup(window=options.tool_dedup_window) if options.tool_dedup_enabled else None
+        )
+        # Per-tool consecutive-failure breaker. Watches web_fetch and
+        # web_search; trips after N failures, refuses calls for K turns.
+        self._tool_breaker = WebFetchCircuitBreaker(
+            threshold=options.web_fetch_failure_threshold,
+            cooldown_turns=options.web_fetch_cooldown_turns,
+        )
         # Persistent transcript across run/continue calls within one Agent.
         self._messages: list[Message] = []
         self._messages_initialised = False
@@ -223,6 +249,8 @@ class Agent:
             workspace=self.workspace,
             settings_snapshot=self.options.settings_snapshot,
             file_mutation_queue=self._file_mutation_queue,
+            tool_dedup=self._tool_dedup,
+            tool_breaker=self._tool_breaker,
         )
 
     async def _finalise(self, loop_result: LoopResult) -> RunResult:

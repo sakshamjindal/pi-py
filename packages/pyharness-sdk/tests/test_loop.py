@@ -570,3 +570,180 @@ async def test_parallel_writes_to_same_file_serialise(tmp_path, isolated_session
     )
     # Source order is preserved; second write wins.
     assert (tmp_path / "shared.txt").read_text() == "SECOND"
+
+
+# ---------------------------------------------------------------------------
+# (5) Dedup + circuit breaker end-to-end
+# ---------------------------------------------------------------------------
+
+
+class _CountingReadArgs(BaseModel):
+    path: str
+
+
+class _CountingReadTool(Tool):
+    """Counts how many times execute() actually runs. Used to confirm
+    dedup short-circuits before execution."""
+
+    name = "read"
+    description = "Read a file (test stub)."
+    args_schema = _CountingReadArgs
+    call_count = 0
+
+    async def execute(self, args, ctx):  # type: ignore[override]
+        type(self).call_count += 1
+        target = ctx.workspace / args.path
+        return target.read_text(encoding="utf-8") if target.is_file() else "(missing)"
+
+
+@pytest.mark.asyncio
+async def test_dedup_prevents_repeat_read_in_later_turn(tmp_path, isolated_session_dir):
+    """Calling `read` with the same path on consecutive turns must hit
+    the dedup, return the synthetic message, and NOT execute the tool
+    a second time."""
+
+    (tmp_path / "f.txt").write_text("hello", encoding="utf-8")
+    _CountingReadTool.call_count = 0  # reset class-level counter
+
+    registry = ToolRegistry()
+    registry.register(_CountingReadTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                tool_calls=[ToolCall(id="c1", name="read", arguments={"path": "f.txt"})],
+            ),
+            LLMResponse(
+                tool_calls=[ToolCall(id="c2", name="read", arguments={"path": "f.txt"})],
+            ),
+            LLMResponse(text="done"),
+        ]
+    )
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=10),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=EventBus(),
+        workspace=tmp_path,
+        llm=llm,
+    )
+    result = await agent.run("read it twice")
+    assert result.completed
+    # First call ran. Second call dedup'd.
+    assert _CountingReadTool.call_count == 1, (
+        f"expected 1 actual execute() call (second call deduped); "
+        f"got {_CountingReadTool.call_count}"
+    )
+    # The deduped tool message exists in the transcript with the
+    # synthetic "duplicate call" content.
+    msgs = [m for m in agent._messages if m.role == "tool" and m.tool_call_id == "c2"]
+    assert msgs, "expected a tool message for the deduped second call"
+    assert "duplicate call" in msgs[0].content
+
+
+@pytest.mark.asyncio
+async def test_dedup_disabled_runs_tool_twice(tmp_path, isolated_session_dir):
+    """With tool_dedup_enabled=False, the same call runs twice."""
+
+    (tmp_path / "f.txt").write_text("hello", encoding="utf-8")
+    _CountingReadTool.call_count = 0
+
+    registry = ToolRegistry()
+    registry.register(_CountingReadTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                tool_calls=[ToolCall(id="c1", name="read", arguments={"path": "f.txt"})],
+            ),
+            LLMResponse(
+                tool_calls=[ToolCall(id="c2", name="read", arguments={"path": "f.txt"})],
+            ),
+            LLMResponse(text="done"),
+        ]
+    )
+    agent = Agent(
+        AgentOptions(model="fake", max_turns=10, tool_dedup_enabled=False),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=EventBus(),
+        workspace=tmp_path,
+        llm=llm,
+    )
+    await agent.run("read it twice")
+    assert _CountingReadTool.call_count == 2
+
+
+class _FailingFetchArgs(BaseModel):
+    url: str
+
+
+class _FailingFetchTool(Tool):
+    """Always raises ToolError. Used to feed the breaker consecutive
+    failures."""
+
+    name = "web_fetch"
+    description = "Fetch a URL (always fails)."
+    args_schema = _FailingFetchArgs
+    call_count = 0
+
+    async def execute(self, args, ctx):  # type: ignore[override]
+        type(self).call_count += 1
+        from pyharness import ToolError
+
+        raise ToolError(f"404 Not Found: {args.url}")
+
+
+@pytest.mark.asyncio
+async def test_breaker_opens_after_threshold_and_short_circuits(tmp_path, isolated_session_dir):
+    """Three consecutive web_fetch failures open the breaker. A 4th
+    call within cooldown is refused without executing the tool."""
+
+    _FailingFetchTool.call_count = 0
+    registry = ToolRegistry()
+    registry.register(_FailingFetchTool())
+    session = Session.new(tmp_path, base_dir=tmp_path / "sessions")
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(
+                tool_calls=[ToolCall(id="c1", name="web_fetch", arguments={"url": "https://a"})],
+            ),
+            LLMResponse(
+                tool_calls=[ToolCall(id="c2", name="web_fetch", arguments={"url": "https://b"})],
+            ),
+            LLMResponse(
+                tool_calls=[ToolCall(id="c3", name="web_fetch", arguments={"url": "https://c"})],
+            ),
+            LLMResponse(
+                tool_calls=[ToolCall(id="c4", name="web_fetch", arguments={"url": "https://d"})],
+            ),
+            LLMResponse(text="giving up"),
+        ]
+    )
+    agent = Agent(
+        AgentOptions(
+            model="fake",
+            max_turns=10,
+            web_fetch_failure_threshold=3,
+            web_fetch_cooldown_turns=5,
+        ),
+        system_prompt="test",
+        tool_registry=registry,
+        session=session,
+        event_bus=EventBus(),
+        workspace=tmp_path,
+        llm=llm,
+    )
+    result = await agent.run("try fetching")
+    assert result.completed
+    # Three actual failures executed; the fourth must be short-circuited.
+    assert _FailingFetchTool.call_count == 3, (
+        f"expected 3 real fetches (threshold) before breaker opens; "
+        f"got {_FailingFetchTool.call_count}"
+    )
+    # The 4th tool call has the breaker's synthetic content in the transcript.
+    breaker_msgs = [m for m in agent._messages if m.role == "tool" and m.tool_call_id == "c4"]
+    assert breaker_msgs, "expected a tool message for the refused 4th call"
+    assert "circuit breaker" in breaker_msgs[0].content

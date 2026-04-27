@@ -38,6 +38,16 @@ class Settings(BaseModel):
     # "sequential"`` opt-out. Override to "sequential" to revert to the
     # safer-but-slower mode.
     tool_execution: Literal["parallel", "sequential"] = "parallel"
+    # Per-session dedup of read-only tool calls (read, web_fetch,
+    # web_search, grep, glob). Same args within ``tool_dedup_window``
+    # turns ⇒ synthetic "already called" result. Mutating tools bypass.
+    tool_dedup_enabled: bool = True
+    tool_dedup_window: int = 20
+    # Per-tool failure circuit breaker. Watches web_fetch and web_search;
+    # opens after ``threshold`` consecutive failures, refuses calls for
+    # ``cooldown_turns`` turns, resets on success or expiry.
+    web_fetch_failure_threshold: int = 3
+    web_fetch_cooldown_turns: int = 5
 
     @classmethod
     def load(

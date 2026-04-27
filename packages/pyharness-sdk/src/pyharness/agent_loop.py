@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from .circuit_breaker import WebFetchCircuitBreaker
 from .compaction import Compactor
 from .events import (
     AgentEvent,
@@ -40,6 +41,7 @@ from .events import (
 from .extensions import HookOutcome, HookResult
 from .file_mutation_queue import FileMutationQueue
 from .llm import LLMClient
+from .tool_dedup import ToolCallDedup
 from .tools.base import Tool, ToolContext, ToolExecutionResult, ToolRegistry, execute_tool
 from .types import Message, ToolCall
 
@@ -82,6 +84,11 @@ class LoopConfig:
     # parallelise. ``None`` = no lock; tools that need one fall back to
     # running sequentially within a coarse ``execution_mode``.
     file_mutation_queue: FileMutationQueue | None = None
+    # Per-session deduper for read-only tool calls. ``None`` ⇒ disabled.
+    tool_dedup: ToolCallDedup | None = None
+    # Per-tool consecutive-failure breaker. Always present (tools not in
+    # ``WATCHED_TOOLS`` are no-ops); ``None`` = disabled entirely.
+    tool_breaker: WebFetchCircuitBreaker | None = None
 
 
 @dataclass
@@ -223,6 +230,12 @@ async def _run_loop(
             reason = "aborted"
             break
         turn += 1
+        # Bump per-turn counters used by dedup ("turns ago") and the
+        # circuit breaker (cooldown expiry).
+        if config.tool_dedup is not None:
+            config.tool_dedup.advance_turn()
+        if config.tool_breaker is not None:
+            config.tool_breaker.advance_turn()
 
         await _drain_into_messages(
             messages,
@@ -425,6 +438,48 @@ async def _dispatch_tool_batch(
             immediate[tc.id] = (msg, ter)
             continue
 
+        # Circuit breaker: refuse if the tool's open from prior failures.
+        # Checked before dedup so a breaker-open call doesn't poison the
+        # dedup LRU.
+        if config.tool_breaker is not None:
+            open_state = config.tool_breaker.check(tc.name)
+            if open_state is not None:
+                ter = ToolExecutionResult(
+                    ok=False,
+                    content=open_state.synthetic_content,
+                    error="circuit_open",
+                )
+                await _record_tool_end(tc.id, tc.name, ter, session_appender, config.session_id)
+                msg = Message(
+                    role="tool",
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=open_state.synthetic_content,
+                )
+                immediate[tc.id] = (msg, ter)
+                continue
+
+        # Dedup: identical (tool, args) within recent window ⇒ synthetic
+        # "already called" result. Read-only tools only; mutating tools
+        # bypass via DEDUPED_TOOLS membership.
+        if config.tool_dedup is not None:
+            hit = config.tool_dedup.check(tc.name, tc.arguments)
+            if hit is not None:
+                ter = ToolExecutionResult(
+                    ok=True,
+                    content=hit.synthetic_content,
+                    error="duplicate_call",
+                )
+                await _record_tool_end(tc.id, tc.name, ter, session_appender, config.session_id)
+                msg = Message(
+                    role="tool",
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=hit.synthetic_content,
+                )
+                immediate[tc.id] = (msg, ter)
+                continue
+
         runnable_by_id[tc.id] = _PreparedCall(tool_call=tc, tool=tool)
 
     # ---- Decide execution mode ----
@@ -469,6 +524,14 @@ async def _dispatch_tool_batch(
             max_lines=config.tool_output_max_lines,
         )
         await _record_tool_end(tc.id, tc.name, ter, session_appender, config.session_id)
+        # Update dedup + breaker state from the executed result.
+        if config.tool_dedup is not None:
+            config.tool_dedup.record(tc.name, tc.arguments)
+        if config.tool_breaker is not None:
+            if ter.ok:
+                config.tool_breaker.record_success(tc.name)
+            else:
+                config.tool_breaker.record_failure(tc.name)
         await emit_lifecycle(
             "after_tool_call",
             {
