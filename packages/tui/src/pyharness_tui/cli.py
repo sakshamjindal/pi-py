@@ -36,12 +36,26 @@ def _attach_trace(agent: CodingAgent) -> None:
     agent.event_bus.subscribe("after_tool_call", on_tool_end)
 
 
-def _build_agent(workspace: Path, *, bare: bool, model: str | None) -> CodingAgent | None:
+def _build_agent(
+    workspace: Path,
+    *,
+    bare: bool,
+    model: str | None,
+    resume_from: str | None = None,
+) -> CodingAgent | None:
     """Construct the agent or print a friendly message and return None on
-    NoProjectError."""
+    NoProjectError. ``resume_from`` carries forward a session_id so the
+    REPL maintains conversation history across prompts."""
 
     try:
-        return CodingAgent(CodingAgentConfig(workspace=workspace, model=model, bare=bare))
+        return CodingAgent(
+            CodingAgentConfig(
+                workspace=workspace,
+                model=model,
+                bare=bare,
+                resume_from=resume_from,
+            )
+        )
     except NoProjectError as exc:
         sys.stderr.write(f"{exc}\n")
         return None
@@ -71,6 +85,14 @@ async def _repl(workspace: Path, *, bare: bool, model: str | None) -> int:
         "Type a prompt, `exit`/`quit`, or Ctrl-D to leave.\n"
     )
     sys.stderr.flush()
+
+    # Carry session_id across REPL turns so the model keeps full prior
+    # context. First prompt builds a fresh session; turns 2+ resume the
+    # same session (loop reads prior messages from the JSONL log on
+    # construction). Without this, every REPL prompt was an independent
+    # session with no memory of the previous one.
+    session_id: str | None = None
+
     while True:
         try:
             prompt = input("> ").strip()
@@ -81,13 +103,11 @@ async def _repl(workspace: Path, *, bare: bool, model: str | None) -> int:
             continue
         if prompt in ("exit", "quit"):
             return 0
-        # Construct a fresh agent per turn so the project marker is
-        # re-checked and per-prompt config (e.g. --bare toggling) takes
-        # effect immediately.
-        agent = _build_agent(workspace, bare=bare, model=model)
+        agent = _build_agent(workspace, bare=bare, model=model, resume_from=session_id)
         if agent is None:
             return 2
         await _run_once(prompt, agent)
+        session_id = agent.session.session_id
 
 
 def _build_parser() -> argparse.ArgumentParser:

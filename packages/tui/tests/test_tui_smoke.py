@@ -208,3 +208,53 @@ def test_startup_banner_shows_workspace_and_model(
     err = capsys.readouterr().err
     assert "workspace=" in err
     assert "test-model" in err
+
+
+def test_repl_carries_session_across_prompts(tmp_path, monkeypatch, isolated_session_dir, capsys):
+    """REGRESSION: REPL must keep the model's prior context across
+    prompts. Pre-fix, every prompt got a fresh session, producing
+    multiple JSONL files with no shared history. Now the second prompt
+    resumes the first prompt's session_id, so all turns land in one log
+    and the model sees prior messages on subsequent calls.
+    """
+
+    (tmp_path / ".pyharness").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    inputs = iter(["first prompt", "second prompt", "exit"])
+
+    def _input(_prompt):
+        return next(inputs)
+
+    monkeypatch.setattr("builtins.input", _input)
+
+    seen_session_ids: list[str] = []
+    real_init = CodingAgent.__init__
+
+    def patched_init(self, config):
+        real_init(self, config)
+        seen_session_ids.append(self.session.session_id)
+
+        async def _complete(**_):
+            return LLMResponse(text="ok")
+
+        self.llm.complete = _complete  # type: ignore
+
+    monkeypatch.setattr(CodingAgent, "__init__", patched_init)
+
+    from pyharness_tui.cli import main
+
+    main([])
+
+    # Both prompts produced agents — and they SHARE the same session_id.
+    assert len(seen_session_ids) == 2, f"expected 2 prompts to build agents, got {seen_session_ids}"
+    assert seen_session_ids[0] == seen_session_ids[1], (
+        f"REPL fragmented the conversation: turn 1 session={seen_session_ids[0]}, "
+        f"turn 2 session={seen_session_ids[1]}. Should be the same id (resume)."
+    )
+
+    # Exactly one JSONL file on disk (not one per prompt).
+    log_files = list((isolated_session_dir).rglob("*.jsonl"))
+    assert len(log_files) == 1, (
+        f"expected 1 session file across both prompts, got {len(log_files)}: {log_files}"
+    )
