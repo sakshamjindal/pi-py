@@ -4,9 +4,10 @@ A REPL: read a line, run the coding agent, print the result, repeat.
 Pass a prompt as argv for one-shot mode. Type ``exit`` / ``quit`` or
 hit Ctrl-D to leave the REPL.
 
-Stdlib only. Tool calls are traced to stderr (``  → tool_name`` on
-start, ``    [error]`` on failure) so you can see what the agent is
-doing without a noisy event stream.
+Stdlib only. Tool calls are traced to stderr — the trace shows the
+tool name and a one-line preview of the most useful argument
+(``  → read config.json``, ``  → bash ls -la``) so you can see what
+the agent is actually doing, not just which tools fired.
 """
 
 from __future__ import annotations
@@ -15,13 +16,70 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 from coding_harness import CodingAgent, CodingAgentConfig, NoProjectError
+
+# Per-tool argument-preview rules. The first key in the list whose
+# value is a non-empty string is rendered after the tool name. For
+# tools not listed here we fall back to compacting the whole arguments
+# dict.
+_PREVIEW_KEYS: dict[str, list[str]] = {
+    "bash": ["command"],
+    "read": ["path", "file_path"],
+    "edit": ["path", "file_path"],
+    "write": ["path", "file_path"],
+    "glob": ["pattern"],
+    "grep": ["pattern"],
+    "web_fetch": ["url"],
+    "web_search": ["query"],
+    "load_skill": ["name"],
+}
+
+_PREVIEW_MAX = 80
+
+
+def _format_tool_trace(tool_name: str, arguments: Any) -> str:
+    """Render one trace line. Always returns ``→ <name>`` plus, when
+    available, a one-line preview of the most informative argument
+    truncated to ``_PREVIEW_MAX`` chars."""
+
+    line = f"  → {tool_name}"
+    if not isinstance(arguments, dict) or not arguments:
+        return line
+
+    preview: str | None = None
+    for key in _PREVIEW_KEYS.get(tool_name, ()):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            preview = value
+            break
+    if preview is None:
+        # Generic fallback: take the first scalar arg, in dict order.
+        for value in arguments.values():
+            if isinstance(value, str) and value.strip():
+                preview = value
+                break
+            if isinstance(value, (int, float, bool)):
+                preview = str(value)
+                break
+
+    if preview is None:
+        return line
+    # Collapse whitespace and truncate.
+    flat = " ".join(preview.split())
+    if len(flat) > _PREVIEW_MAX:
+        flat = flat[: _PREVIEW_MAX - 1] + "…"
+    return f"{line} {flat}"
 
 
 def _attach_trace(agent: CodingAgent) -> None:
     async def on_tool_start(event, ctx):
-        sys.stderr.write(f"  → {event.payload.get('tool_name')}\n")
+        line = _format_tool_trace(
+            event.payload.get("tool_name", ""),
+            event.payload.get("arguments"),
+        )
+        sys.stderr.write(line + "\n")
         sys.stderr.flush()
         return None
 
